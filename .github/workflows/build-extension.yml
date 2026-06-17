@@ -11,14 +11,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Run extension smoke test
+        run: node extension/smoke-test.mjs
+
       - name: Zip extension
         run: |
           cd extension
-          zip -r ../extension.zip .
+          zip -r ../web-shiori.zip .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: extension
-          path: extension.zip
+          name: web-shiori
+          path: web-shiori.zip
           retention-days: 7
