@@ -3,7 +3,7 @@
   "name": "web-shiori",
   "version": "0.1.0",
   "description": "Chrome extension: save next actions per URL + page position.",
-  "permissions": ["storage"],
+  "permissions": ["storage", "tabs"],
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup.html"
@@ -11,19 +11,8 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["contentScript.js"],
+      "js": ["storage.js", "contentScript.js"],
       "run_at": "document_idle"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "popup.html",
-        "popup.js",
-        "storage.js",
-        "contentScript.js"
-      ],
-      "matches": ["<all_urls>"]
     }
   ]
 }
