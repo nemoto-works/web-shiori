@@ -45,6 +45,9 @@ assert.match(contentScriptJs, /renderStickyNotes\(\{ restoreScroll: false \}\)/)
 assert.match(contentScriptJs, /WEB_SHIORI_QUICK_ENTRY/);
 assert.match(contentScriptJs, /showQuickEntryDialog/);
 assert.match(contentScriptJs, /saveQuickEntryNote/);
+assert.match(contentScriptJs, /const initialPosition = getSelectionPosition\(\) \|\| getStickyPosition\(0\)/);
+assert.match(contentScriptJs, /saveQuickEntryNote\(noteText, initialPosition\)/);
+assert.match(contentScriptJs, /const position = initialPosition \|\| getSelectionPosition\(\) \|\| getStickyPosition\(0\)/);
 assert.match(contentScriptJs, /web-shiori-quick-entry/);
 assert.match(contentScriptJs, /ctrlKey/);
 assert.match(contentScriptJs, /Escape/);

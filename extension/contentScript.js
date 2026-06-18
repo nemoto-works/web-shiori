@@ -209,11 +209,11 @@ function removeQuickEntryDialog() {
   document.getElementById('web-shiori-quick-entry')?.remove();
 }
 
-async function saveQuickEntryNote(noteText) {
+async function saveQuickEntryNote(noteText, initialPosition = null) {
   const storage = window.webShioriStorage;
   if (!storage?.addNote) return false;
 
-  const position = getSelectionPosition() || getStickyPosition(0);
+  const position = initialPosition || getSelectionPosition() || getStickyPosition(0);
   const anchor = position.selectedText
     ? {
         selectedText: position.selectedText,
@@ -241,6 +241,7 @@ async function saveQuickEntryNote(noteText) {
 }
 
 function showQuickEntryDialog() {
+  const initialPosition = getSelectionPosition() || getStickyPosition(0);
   const existingTextarea = document.querySelector('#web-shiori-quick-entry textarea');
   if (existingTextarea) {
     existingTextarea.focus();
@@ -304,7 +305,7 @@ function showQuickEntryDialog() {
     if (!noteText) return;
 
     saveButton.disabled = true;
-    const saved = await saveQuickEntryNote(noteText);
+    const saved = await saveQuickEntryNote(noteText, initialPosition);
     if (saved) removeQuickEntryDialog();
     else saveButton.disabled = false;
   };
