@@ -6,7 +6,7 @@ const extensionDir = new URL('.', import.meta.url).pathname;
 const manifest = JSON.parse(readFileSync(join(extensionDir, 'manifest.json'), 'utf8'));
 
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, '0.1.2');
+assert.equal(manifest.version, '0.1.3');
 assert.equal(manifest.action.default_popup, 'popup.html');
 assert.ok(manifest.permissions.includes('storage'));
 assert.ok(manifest.permissions.includes('tabs'));
@@ -31,6 +31,9 @@ assert.match(contentScriptJs, /WEB_SHIORI_REFRESH_NOTES/);
 assert.match(contentScriptJs, /querySelectorAll\('\.web-shiori-note'\)/);
 assert.match(contentScriptJs, /!note.completed/);
 assert.match(contentScriptJs, /getSelectionPosition/);
+assert.match(contentScriptJs, /selectedText/);
+assert.match(contentScriptJs, /selectionRect/);
+assert.match(contentScriptJs, /anchor/);
 assert.match(contentScriptJs, /makeStickyNoteDraggable/);
 assert.match(contentScriptJs, /pointerdown/);
 assert.match(contentScriptJs, /updateNote\(note.id, \{ x, y, position \}\)/);
@@ -42,6 +45,9 @@ assert.match(contentScriptJs, /renderStickyNotes\(\{ restoreScroll: false \}\)/)
 assert.match(contentScriptJs, /WEB_SHIORI_QUICK_ENTRY/);
 assert.match(contentScriptJs, /showQuickEntryDialog/);
 assert.match(contentScriptJs, /saveQuickEntryNote/);
+assert.match(contentScriptJs, /const initialPosition = getSelectionPosition\(\) \|\| getStickyPosition\(0\)/);
+assert.match(contentScriptJs, /saveQuickEntryNote\(noteText, initialPosition\)/);
+assert.match(contentScriptJs, /const position = initialPosition \|\| getSelectionPosition\(\) \|\| getStickyPosition\(0\)/);
 assert.match(contentScriptJs, /web-shiori-quick-entry/);
 assert.match(contentScriptJs, /ctrlKey/);
 assert.match(contentScriptJs, /Escape/);
@@ -77,5 +83,8 @@ assert.match(popupJs, /chrome\.tabs\.update/);
 assert.match(popupJs, /WEB_SHIORI_REFRESH_NOTES/);
 assert.match(popupJs, /getManifest/);
 assert.match(popupJs, /position/);
+assert.match(popupJs, /getAnchorFromPosition/);
+assert.match(popupJs, /selectedText/);
+assert.match(popupJs, /anchor/);
 
 console.log('extension smoke test passed');

@@ -16,7 +16,20 @@ function getSelectionPosition() {
     scrollY: window.scrollY,
     viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
+    selectedText: selection.toString().slice(0, 120),
     selectionText: selection.toString().slice(0, 120),
+    selectionRect: {
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+      pageLeft: rect.left + window.scrollX,
+      pageTop: rect.top + window.scrollY,
+      pageRight: rect.right + window.scrollX,
+      pageBottom: rect.bottom + window.scrollY,
+    },
   };
 }
 
@@ -196,11 +209,23 @@ function removeQuickEntryDialog() {
   document.getElementById('web-shiori-quick-entry')?.remove();
 }
 
-async function saveQuickEntryNote(noteText) {
+async function saveQuickEntryNote(noteText, initialPosition = null) {
   const storage = window.webShioriStorage;
   if (!storage?.addNote) return false;
 
-  const position = getSelectionPosition() || getStickyPosition(0);
+  const position = initialPosition || getSelectionPosition() || getStickyPosition(0);
+  const anchor = position.selectedText
+    ? {
+        selectedText: position.selectedText,
+        selectionText: position.selectionText,
+        selectionRect: position.selectionRect,
+        scrollX: position.scrollX,
+        scrollY: position.scrollY,
+        viewportWidth: position.viewportWidth,
+        viewportHeight: position.viewportHeight,
+      }
+    : undefined;
+
   await storage.addNote({
     url: window.location.href,
     title: document.title,
@@ -208,6 +233,7 @@ async function saveQuickEntryNote(noteText) {
     x: position.x,
     y: position.y,
     position,
+    ...(anchor ? { anchor } : {}),
     completed: false,
   });
   await renderStickyNotes({ restoreScroll: false });
@@ -215,6 +241,7 @@ async function saveQuickEntryNote(noteText) {
 }
 
 function showQuickEntryDialog() {
+  const initialPosition = getSelectionPosition() || getStickyPosition(0);
   const existingTextarea = document.querySelector('#web-shiori-quick-entry textarea');
   if (existingTextarea) {
     existingTextarea.focus();
@@ -278,7 +305,7 @@ function showQuickEntryDialog() {
     if (!noteText) return;
 
     saveButton.disabled = true;
-    const saved = await saveQuickEntryNote(noteText);
+    const saved = await saveQuickEntryNote(noteText, initialPosition);
     if (saved) removeQuickEntryDialog();
     else saveButton.disabled = false;
   };
