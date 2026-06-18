@@ -161,10 +161,15 @@ function restoreScrollPosition(notes) {
   });
 }
 
+function clearStickyNotes() {
+  document.querySelectorAll('.web-shiori-note').forEach((note) => note.remove());
+}
+
 async function renderStickyNotes() {
   const storage = window.webShioriStorage;
   if (!storage?.getNotesForUrl) return;
 
+  clearStickyNotes();
   const notes = await storage.getNotesForUrl(window.location.href);
   const activeNotes = (notes || []).filter((note) => !note.completed);
   restoreScrollPosition(activeNotes);
@@ -174,14 +179,23 @@ async function renderStickyNotes() {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== 'WEB_SHIORI_GET_PAGE_CONTEXT') return false;
+  if (message?.type === 'WEB_SHIORI_GET_PAGE_CONTEXT') {
+    sendResponse({
+      url: window.location.href,
+      title: document.title,
+      position: getSelectionPosition() || getStickyPosition(0),
+    });
+    return true;
+  }
 
-  sendResponse({
-    url: window.location.href,
-    title: document.title,
-    position: getSelectionPosition() || getStickyPosition(0),
-  });
-  return true;
+  if (message?.type === 'WEB_SHIORI_REFRESH_NOTES') {
+    renderStickyNotes()
+      .then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  return false;
 });
 
 (async () => {
