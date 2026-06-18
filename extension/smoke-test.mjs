@@ -24,6 +24,12 @@ assert.doesNotMatch(contentScriptJs, /rgb\(async/);
 assert.match(contentScriptJs, /webShioriStorage/);
 assert.match(contentScriptJs, /WEB_SHIORI_GET_PAGE_CONTEXT/);
 assert.match(contentScriptJs, /!note.completed/);
+assert.match(contentScriptJs, /getSelectionPosition/);
+assert.match(contentScriptJs, /makeStickyNoteDraggable/);
+assert.match(contentScriptJs, /pointerdown/);
+assert.match(contentScriptJs, /updateNote\(note.id, \{ x, y, position \}\)/);
+assert.match(contentScriptJs, /restoreScrollPosition/);
+assert.match(contentScriptJs, /scrollTo/);
 
 const popupHtml = readFileSync(join(extensionDir, 'popup.html'), 'utf8');
 assert.match(popupHtml, /id="notes"/);
