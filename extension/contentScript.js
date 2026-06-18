@@ -191,12 +191,129 @@ async function renderStickyNotes({ restoreScroll = true } = {}) {
   });
 }
 
+
+function removeQuickEntryDialog() {
+  document.getElementById('web-shiori-quick-entry')?.remove();
+}
+
+async function saveQuickEntryNote(noteText) {
+  const storage = window.webShioriStorage;
+  if (!storage?.addNote) return false;
+
+  const position = getSelectionPosition() || getStickyPosition(0);
+  await storage.addNote({
+    url: window.location.href,
+    title: document.title,
+    text: noteText,
+    x: position.x,
+    y: position.y,
+    position,
+    completed: false,
+  });
+  await renderStickyNotes({ restoreScroll: false });
+  return true;
+}
+
+function showQuickEntryDialog() {
+  const existingTextarea = document.querySelector('#web-shiori-quick-entry textarea');
+  if (existingTextarea) {
+    existingTextarea.focus();
+    return;
+  }
+
+  const dialog = document.createElement('div');
+  dialog.id = 'web-shiori-quick-entry';
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-label', 'Web Shiori quick note');
+  dialog.style.position = 'fixed';
+  dialog.style.zIndex = '2147483647';
+  dialog.style.right = '16px';
+  dialog.style.bottom = '16px';
+  dialog.style.width = 'min(360px, calc(100vw - 32px))';
+  dialog.style.padding = '12px';
+  dialog.style.background = '#fff';
+  dialog.style.border = '1px solid rgba(0,0,0,.2)';
+  dialog.style.borderRadius = '8px';
+  dialog.style.boxShadow = '0 8px 24px rgba(0,0,0,.22)';
+  dialog.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif';
+  dialog.style.color = '#222';
+
+  const label = document.createElement('label');
+  label.textContent = 'Web Shiori note';
+  label.style.display = 'block';
+  label.style.marginBottom = '6px';
+  label.style.fontSize = '13px';
+  label.style.fontWeight = '600';
+
+  const textarea = document.createElement('textarea');
+  textarea.rows = 4;
+  textarea.placeholder = 'Enter a note for this page…';
+  textarea.style.boxSizing = 'border-box';
+  textarea.style.width = '100%';
+  textarea.style.margin = '0';
+  textarea.style.padding = '8px';
+  textarea.style.border = '1px solid rgba(0,0,0,.25)';
+  textarea.style.borderRadius = '6px';
+  textarea.style.font = 'inherit';
+  textarea.style.resize = 'vertical';
+
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.justifyContent = 'flex-end';
+  actions.style.gap = '8px';
+  actions.style.marginTop = '8px';
+
+  const cancelButton = document.createElement('button');
+  cancelButton.type = 'button';
+  cancelButton.textContent = 'Cancel';
+
+  const saveButton = document.createElement('button');
+  saveButton.type = 'button';
+  saveButton.textContent = 'Save note';
+
+  const save = async () => {
+    if (saveButton.disabled) return;
+
+    const noteText = textarea.value.trim();
+    if (!noteText) return;
+
+    saveButton.disabled = true;
+    const saved = await saveQuickEntryNote(noteText);
+    if (saved) removeQuickEntryDialog();
+    else saveButton.disabled = false;
+  };
+
+  cancelButton.addEventListener('click', removeQuickEntryDialog);
+  saveButton.addEventListener('click', save);
+  textarea.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      removeQuickEntryDialog();
+      event.preventDefault();
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      save();
+      event.preventDefault();
+    }
+  });
+
+  actions.append(cancelButton, saveButton);
+  dialog.append(label, textarea, actions);
+  document.body.appendChild(dialog);
+  textarea.focus();
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'WEB_SHIORI_REFRESH_NOTES') {
     renderStickyNotes({ restoreScroll: false })
       .then(() => sendResponse({ ok: true }))
       .catch(() => sendResponse({ ok: false }));
     return true;
+  }
+
+  if (message?.type === 'WEB_SHIORI_QUICK_ENTRY') {
+    showQuickEntryDialog();
+    sendResponse({ ok: true });
+    return false;
   }
 
   if (message?.type !== 'WEB_SHIORI_GET_PAGE_CONTEXT') return false;

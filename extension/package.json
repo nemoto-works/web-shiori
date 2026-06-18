@@ -1,5 +1,6 @@
 {
   "scripts": {
-    "test": "node smoke-test.mjs"
+    "test": "node smoke-test.mjs",
+    "package": "node package-extension.mjs"
   }
 }
