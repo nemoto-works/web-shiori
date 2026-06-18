@@ -1,3 +1,49 @@
+let latestInteractionPosition = null;
+
+function getDialogPositionFromPoint(clientX, clientY) {
+  const margin = 16;
+  const dialogWidth = Math.min(360, Math.max(window.innerWidth - 32, 0));
+  const dialogHeight = 190;
+  const x = clamp(clientX + 12, margin, Math.max(window.innerWidth - dialogWidth - margin, margin));
+  const y = clamp(clientY + 12, margin, Math.max(window.innerHeight - dialogHeight - margin, margin));
+
+  return {
+    x,
+    y,
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+  };
+}
+
+function rememberInteractionPosition(event) {
+  if (!Number.isFinite(event?.clientX) || !Number.isFinite(event?.clientY)) return;
+  latestInteractionPosition = getDialogPositionFromPoint(event.clientX, event.clientY);
+}
+
+function getQuickEntryPosition() {
+  return getSelectionPosition() || latestInteractionPosition || null;
+}
+
+function getQuickEntryFallbackPosition() {
+  const margin = 16;
+  const dialogWidth = Math.min(360, Math.max(window.innerWidth - 32, 0));
+  const dialogHeight = 190;
+
+  return {
+    x: Math.max(window.innerWidth - dialogWidth - margin, margin),
+    y: Math.max(window.innerHeight - dialogHeight - margin, margin),
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+  };
+}
+
+document.addEventListener('pointerdown', rememberInteractionPosition, { capture: true, passive: true });
+document.addEventListener('click', rememberInteractionPosition, { capture: true, passive: true });
+
 function getSelectionPosition() {
   const selection = window.getSelection?.();
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
@@ -78,7 +124,7 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-function makeStickyNoteDraggable(el, note, initialPosition) {
+function makeStickyNoteDraggable(el, note, initialPosition, onClickWithoutDrag) {
   const storage = window.webShioriStorage;
   if (!storage?.updateNote || !note.id) return;
 
@@ -128,7 +174,11 @@ function makeStickyNoteDraggable(el, note, initialPosition) {
     el.removeEventListener('pointerup', onPointerUp);
     el.removeEventListener('pointercancel', onPointerUp);
 
-    if (moved) await persistPosition();
+    if (moved) {
+      await persistPosition();
+    } else {
+      onClickWithoutDrag?.(event);
+    }
   };
 
   el.style.cursor = 'grab';
@@ -149,6 +199,80 @@ function makeStickyNoteDraggable(el, note, initialPosition) {
     el.addEventListener('pointercancel', onPointerUp);
     event.preventDefault();
   });
+}
+
+function openStickyNoteEditor(el, note) {
+  const storage = window.webShioriStorage;
+  if (!storage?.updateNote || !note.id || el.querySelector('textarea')) return;
+
+  const originalText = note.text || '';
+  el.textContent = '';
+  el.style.cursor = 'default';
+
+  const textarea = document.createElement('textarea');
+  textarea.value = originalText;
+  textarea.setAttribute('aria-label', 'Edit Web Shiori note');
+  textarea.style.boxSizing = 'border-box';
+  textarea.style.width = '100%';
+  textarea.style.minWidth = '220px';
+  textarea.style.minHeight = '80px';
+  textarea.style.margin = '0';
+  textarea.style.padding = '6px';
+  textarea.style.border = '1px solid rgba(0,0,0,.25)';
+  textarea.style.borderRadius = '4px';
+  textarea.style.font = 'inherit';
+  textarea.style.resize = 'vertical';
+
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.justifyContent = 'flex-end';
+  actions.style.gap = '6px';
+  actions.style.marginTop = '6px';
+
+  const cancelButton = document.createElement('button');
+  cancelButton.type = 'button';
+  cancelButton.textContent = 'Cancel';
+
+  const saveButton = document.createElement('button');
+  saveButton.type = 'button';
+  saveButton.textContent = 'Save';
+
+  const closeEditor = (text) => {
+    el.textContent = text;
+    el.style.cursor = 'grab';
+  };
+
+  const save = async () => {
+    if (saveButton.disabled) return;
+    const text = textarea.value.trim();
+    if (!text) return;
+
+    saveButton.disabled = true;
+    await storage.updateNote(note.id, { text });
+    note.text = text;
+    closeEditor(text);
+  };
+
+  textarea.addEventListener('pointerdown', (event) => event.stopPropagation());
+  textarea.addEventListener('click', (event) => event.stopPropagation());
+  actions.addEventListener('pointerdown', (event) => event.stopPropagation());
+  cancelButton.addEventListener('click', () => closeEditor(originalText));
+  saveButton.addEventListener('click', save);
+  textarea.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeEditor(originalText);
+      event.preventDefault();
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      save();
+      event.preventDefault();
+    }
+  });
+
+  actions.append(cancelButton, saveButton);
+  el.append(textarea, actions);
+  textarea.focus();
+  textarea.select();
 }
 
 function createStickyNote(note, index) {
@@ -175,7 +299,11 @@ function createStickyNote(note, index) {
   el.style.top = `${clampedPosition.y}px`;
   el.style.left = `${clampedPosition.x}px`;
 
-  makeStickyNoteDraggable(el, note, clampedPosition);
+  makeStickyNoteDraggable(el, note, clampedPosition, () => openStickyNoteEditor(el, note));
+  el.addEventListener('dblclick', (event) => {
+    event.preventDefault();
+    openStickyNoteEditor(el, note);
+  });
   return el;
 }
 
@@ -213,7 +341,7 @@ async function saveQuickEntryNote(noteText, initialPosition = null) {
   const storage = window.webShioriStorage;
   if (!storage?.addNote) return false;
 
-  const position = initialPosition || getSelectionPosition() || getStickyPosition(0);
+  const position = initialPosition || getQuickEntryPosition() || getStickyPosition(0);
   const anchor = position.selectedText
     ? {
         selectedText: position.selectedText,
@@ -241,7 +369,7 @@ async function saveQuickEntryNote(noteText, initialPosition = null) {
 }
 
 function showQuickEntryDialog() {
-  const initialPosition = getSelectionPosition() || getStickyPosition(0);
+  const initialPosition = getQuickEntryPosition();
   const existingTextarea = document.querySelector('#web-shiori-quick-entry textarea');
   if (existingTextarea) {
     existingTextarea.focus();
@@ -254,8 +382,9 @@ function showQuickEntryDialog() {
   dialog.setAttribute('aria-label', 'Web Shiori quick note');
   dialog.style.position = 'fixed';
   dialog.style.zIndex = '2147483647';
-  dialog.style.right = '16px';
-  dialog.style.bottom = '16px';
+  const dialogPosition = initialPosition || getQuickEntryFallbackPosition();
+  dialog.style.left = `${dialogPosition.x}px`;
+  dialog.style.top = `${dialogPosition.y}px`;
   dialog.style.width = 'min(360px, calc(100vw - 32px))';
   dialog.style.padding = '12px';
   dialog.style.background = '#fff';
@@ -348,7 +477,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   sendResponse({
     url: window.location.href,
     title: document.title,
-    position: getSelectionPosition() || getStickyPosition(0),
+    position: getQuickEntryPosition() || getStickyPosition(0),
   });
   return true;
 });
