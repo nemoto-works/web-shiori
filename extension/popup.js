@@ -82,6 +82,20 @@ async function openOrFocusNoteUrl(note) {
   await chrome.tabs.create({ url: note.url });
 }
 
+function getAnchorMetadata(position) {
+  const selectedText = position?.selectedText || position?.selectionText || '';
+  if (!selectedText) return undefined;
+
+  return {
+    selectedText,
+    selectionRect: position.selectionRect,
+    scrollX: position.scrollX,
+    scrollY: position.scrollY,
+    viewportWidth: position.viewportWidth,
+    viewportHeight: position.viewportHeight,
+  };
+}
+
 function renderVersion() {
   const versionEl = document.getElementById('version');
   const manifest = chrome.runtime.getManifest?.();
@@ -197,6 +211,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       x: pageContext.position.x,
       y: pageContext.position.y,
       position: pageContext.position,
+      anchor: getAnchorMetadata(pageContext.position),
       completed: false,
     });
 

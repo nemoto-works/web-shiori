@@ -1,3 +1,16 @@
+function getSelectionRectMetadata(rect) {
+  return {
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+    width: rect.width,
+    height: rect.height,
+    pageX: rect.left + window.scrollX,
+    pageY: rect.top + window.scrollY,
+  };
+}
+
 function getSelectionPosition() {
   const selection = window.getSelection?.();
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
@@ -9,6 +22,9 @@ function getSelectionPosition() {
   const x = Math.min(Math.max(rect.left, margin), Math.max(window.innerWidth - 280, margin));
   const y = Math.min(Math.max(rect.bottom + 8, margin), Math.max(window.innerHeight - 120, margin));
 
+  const selectedText = selection.toString().slice(0, 120);
+  const selectionRect = getSelectionRectMetadata(rect);
+
   return {
     x,
     y,
@@ -16,7 +32,10 @@ function getSelectionPosition() {
     scrollY: window.scrollY,
     viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
-    selectionText: selection.toString().slice(0, 120),
+    selectedText,
+    // Keep the previous metadata key readable for notes created by earlier prerelease builds.
+    selectionText: selectedText,
+    selectionRect,
   };
 }
 
