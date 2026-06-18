@@ -1,3 +1,25 @@
+function getSelectionPosition() {
+  const selection = window.getSelection?.();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+
+  const rect = selection.getRangeAt(0).getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return null;
+
+  const margin = 16;
+  const x = Math.min(Math.max(rect.left, margin), Math.max(window.innerWidth - 280, margin));
+  const y = Math.min(Math.max(rect.bottom + 8, margin), Math.max(window.innerHeight - 120, margin));
+
+  return {
+    x,
+    y,
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    selectionText: selection.toString().slice(0, 120),
+  };
+}
+
 function getStickyPosition(index) {
   const margin = 16;
   const baseTop = Math.min(Math.max(window.innerHeight * 0.18, 80), 180);
@@ -13,15 +35,104 @@ function getStickyPosition(index) {
   };
 }
 
-function createStickyNote(note, index) {
+function getNotePosition(note, index) {
+  const fallback = getStickyPosition(index);
   const position = note.position || {};
+
+  return {
+    ...fallback,
+    ...position,
+    x: Number.isFinite(position.x) ? position.x : Number.isFinite(note.x) ? note.x : fallback.x,
+    y: Number.isFinite(position.y) ? position.y : Number.isFinite(note.y) ? note.y : fallback.y,
+  };
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function makeStickyNoteDraggable(el, note, initialPosition) {
+  const storage = window.webShioriStorage;
+  if (!storage?.updateNote || !note.id) return;
+
+  let startPointerX = 0;
+  let startPointerY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+  let moved = false;
+
+  const persistPosition = async () => {
+    const x = parseFloat(el.style.left) || initialPosition.x;
+    const y = parseFloat(el.style.top) || initialPosition.y;
+    const position = {
+      ...(note.position || {}),
+      x,
+      y,
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    };
+
+    note.x = x;
+    note.y = y;
+    note.position = position;
+    await storage.updateNote(note.id, { x, y, position });
+  };
+
+  const onPointerMove = (event) => {
+    if (event.buttons === 0) return;
+
+    const nextLeft = startLeft + event.clientX - startPointerX;
+    const nextTop = startTop + event.clientY - startPointerY;
+    const maxLeft = Math.max(window.innerWidth - el.offsetWidth - 8, 8);
+    const maxTop = Math.max(window.innerHeight - el.offsetHeight - 8, 8);
+
+    el.style.left = `${clamp(nextLeft, 8, maxLeft)}px`;
+    el.style.top = `${clamp(nextTop, 8, maxTop)}px`;
+    moved = true;
+    event.preventDefault();
+  };
+
+  const onPointerUp = async (event) => {
+    el.releasePointerCapture?.(event.pointerId);
+    el.style.cursor = 'grab';
+    el.removeEventListener('pointermove', onPointerMove);
+    el.removeEventListener('pointerup', onPointerUp);
+    el.removeEventListener('pointercancel', onPointerUp);
+
+    if (moved) await persistPosition();
+  };
+
+  el.style.cursor = 'grab';
+  el.style.touchAction = 'none';
+  el.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+
+    startPointerX = event.clientX;
+    startPointerY = event.clientY;
+    startLeft = parseFloat(el.style.left) || initialPosition.x;
+    startTop = parseFloat(el.style.top) || initialPosition.y;
+    moved = false;
+
+    el.style.cursor = 'grabbing';
+    el.setPointerCapture?.(event.pointerId);
+    el.addEventListener('pointermove', onPointerMove);
+    el.addEventListener('pointerup', onPointerUp);
+    el.addEventListener('pointercancel', onPointerUp);
+    event.preventDefault();
+  });
+}
+
+function createStickyNote(note, index) {
+  const position = getNotePosition(note, index);
   const el = document.createElement('div');
   el.className = 'web-shiori-note';
   el.textContent = note.text;
 
   el.style.position = 'fixed';
-  el.style.top = `${position.y || note.y || getStickyPosition(index).y}px`;
-  el.style.left = `${position.x || note.x || getStickyPosition(index).x}px`;
+  el.style.top = `${position.y}px`;
+  el.style.left = `${position.x}px`;
   el.style.zIndex = '2147483646';
   el.style.maxWidth = 'min(260px, calc(100vw - 32px))';
   el.style.padding = '8px 10px';
@@ -35,7 +146,19 @@ function createStickyNote(note, index) {
   el.style.color = '#222';
   el.style.whiteSpace = 'pre-wrap';
 
+  makeStickyNoteDraggable(el, note, position);
   return el;
+}
+
+function restoreScrollPosition(notes) {
+  const savedPosition = notes.find((note) => !note.completed && note.position?.scrollY !== undefined)?.position;
+  if (!savedPosition) return;
+
+  window.scrollTo({
+    left: savedPosition.scrollX || 0,
+    top: savedPosition.scrollY || 0,
+    behavior: 'instant',
+  });
 }
 
 async function renderStickyNotes() {
@@ -43,11 +166,11 @@ async function renderStickyNotes() {
   if (!storage?.getNotesForUrl) return;
 
   const notes = await storage.getNotesForUrl(window.location.href);
-  (notes || [])
-    .filter((note) => !note.completed)
-    .forEach((note, index) => {
-      document.body.appendChild(createStickyNote(note, index));
-    });
+  const activeNotes = (notes || []).filter((note) => !note.completed);
+  restoreScrollPosition(activeNotes);
+  activeNotes.forEach((note, index) => {
+    document.body.appendChild(createStickyNote(note, index));
+  });
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -56,7 +179,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   sendResponse({
     url: window.location.href,
     title: document.title,
-    position: getStickyPosition(0),
+    position: getSelectionPosition() || getStickyPosition(0),
   });
   return true;
 });
