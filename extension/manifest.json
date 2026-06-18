@@ -24,5 +24,16 @@
       ],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "commands": {
+    "quick-entry": {
+      "suggested_key": {
+        "default": "Alt+Shift+J"
+      },
+      "description": "Create a Web Shiori note on the active page"
+    }
+  }
 }
