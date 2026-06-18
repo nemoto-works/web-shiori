@@ -48,6 +48,21 @@ async function sendRefreshMessage(tab) {
   }
 }
 
+
+function getAnchorFromPosition(position) {
+  if (!position?.selectedText) return undefined;
+
+  return {
+    selectedText: position.selectedText,
+    selectionText: position.selectionText || position.selectedText,
+    selectionRect: position.selectionRect,
+    scrollX: position.scrollX,
+    scrollY: position.scrollY,
+    viewportWidth: position.viewportWidth,
+    viewportHeight: position.viewportHeight,
+  };
+}
+
 function urlsMatch(leftUrl, rightUrl) {
   if (!leftUrl || !rightUrl) return false;
 
@@ -190,6 +205,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const pageContext = await getPageContext(tab);
 
+    const anchor = getAnchorFromPosition(pageContext.position);
+
     await window.webShioriStorage.addNote({
       url: pageContext.url,
       title: pageContext.title,
@@ -197,6 +214,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       x: pageContext.position.x,
       y: pageContext.position.y,
       position: pageContext.position,
+      ...(anchor ? { anchor } : {}),
       completed: false,
     });
 
