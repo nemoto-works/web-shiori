@@ -38,6 +38,24 @@ async function getPageContext(tab) {
   }
 }
 
+async function refreshActiveTabNotes(tab) {
+  if (!tab?.id) return;
+
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: 'WEB_SHIORI_REFRESH_NOTES' });
+  } catch (error) {
+    // The active tab may not have the content script, such as browser internal pages.
+  }
+}
+
+function renderVersion() {
+  const versionEl = document.getElementById('version');
+  const manifest = chrome.runtime.getManifest?.();
+  if (!versionEl || !manifest?.version) return;
+
+  versionEl.textContent = `v${manifest.version}`;
+}
+
 function formatPageContext(note) {
   return note.title || note.url || 'ページ情報なし';
 }
@@ -92,7 +110,9 @@ async function renderNotes() {
 
   sortedNotes.forEach((note) => {
     list.appendChild(createNoteItem(note, async (id) => {
+      const tab = await getActiveTab();
       await window.webShioriStorage.updateNote(id, { completed: true });
+      await refreshActiveTabNotes(tab);
       await renderNotes();
     }));
   });
@@ -124,8 +144,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     textarea.value = '';
+    await refreshActiveTabNotes(tab);
     await renderNotes();
   });
 
+  renderVersion();
   await renderNotes();
 });

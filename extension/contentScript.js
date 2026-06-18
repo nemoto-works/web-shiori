@@ -47,6 +47,20 @@ function getNotePosition(note, index) {
   };
 }
 
+function getClampedNotePosition(position, el) {
+  const margin = 8;
+  const estimatedWidth = el.offsetWidth || Math.min(280, Math.max(window.innerWidth - 32, 0));
+  const estimatedHeight = el.offsetHeight || 120;
+  const maxLeft = Math.max(window.innerWidth - estimatedWidth - margin, margin);
+  const maxTop = Math.max(window.innerHeight - estimatedHeight - margin, margin);
+
+  return {
+    ...position,
+    x: clamp(position.x, margin, maxLeft),
+    y: clamp(position.y, margin, maxTop),
+  };
+}
+
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
@@ -131,8 +145,6 @@ function createStickyNote(note, index) {
   el.textContent = note.text;
 
   el.style.position = 'fixed';
-  el.style.top = `${position.y}px`;
-  el.style.left = `${position.x}px`;
   el.style.zIndex = '2147483646';
   el.style.maxWidth = 'min(260px, calc(100vw - 32px))';
   el.style.padding = '8px 10px';
@@ -146,7 +158,11 @@ function createStickyNote(note, index) {
   el.style.color = '#222';
   el.style.whiteSpace = 'pre-wrap';
 
-  makeStickyNoteDraggable(el, note, position);
+  const clampedPosition = getClampedNotePosition(position, el);
+  el.style.top = `${clampedPosition.y}px`;
+  el.style.left = `${clampedPosition.x}px`;
+
+  makeStickyNoteDraggable(el, note, clampedPosition);
   return el;
 }
 
@@ -162,6 +178,8 @@ function restoreScrollPosition(notes) {
 }
 
 async function renderStickyNotes() {
+  document.querySelectorAll('.web-shiori-note').forEach((noteEl) => noteEl.remove());
+
   const storage = window.webShioriStorage;
   if (!storage?.getNotesForUrl) return;
 
@@ -174,6 +192,13 @@ async function renderStickyNotes() {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'WEB_SHIORI_REFRESH_NOTES') {
+    renderStickyNotes()
+      .then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
   if (message?.type !== 'WEB_SHIORI_GET_PAGE_CONTEXT') return false;
 
   sendResponse({

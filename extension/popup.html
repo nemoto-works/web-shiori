@@ -17,6 +17,7 @@
     .note-context{margin:0; color:#555; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
     .complete-button{font-size:12px; padding:6px;}
     .note-completed-label,.empty-notes{margin:8px 0 0 0; color:#777; font-size:12px;}
+    .popup-footer{margin-top:10px; text-align:right; color:#888; font-size:11px;}
   </style>
 </head>
 <body>
@@ -29,6 +30,9 @@
   <h4>すべての付箋</h4>
   <ul id="notes" aria-live="polite"></ul>
   <div id="status"></div>
+  <footer class="popup-footer" aria-label="build version">
+    <span id="version"></span>
+  </footer>
   <script src="storage.js"></script>
   <script src="popup.js"></script>
 </body>
