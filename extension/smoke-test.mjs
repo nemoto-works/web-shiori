@@ -6,6 +6,7 @@ const extensionDir = new URL('.', import.meta.url).pathname;
 const manifest = JSON.parse(readFileSync(join(extensionDir, 'manifest.json'), 'utf8'));
 
 assert.equal(manifest.manifest_version, 3);
+assert.equal(manifest.version, '0.1.1');
 assert.equal(manifest.action.default_popup, 'popup.html');
 assert.ok(manifest.permissions.includes('storage'));
 assert.ok(manifest.permissions.includes('tabs'));
@@ -23,20 +24,27 @@ const contentScriptJs = readFileSync(join(extensionDir, 'contentScript.js'), 'ut
 assert.doesNotMatch(contentScriptJs, /rgb\(async/);
 assert.match(contentScriptJs, /webShioriStorage/);
 assert.match(contentScriptJs, /WEB_SHIORI_GET_PAGE_CONTEXT/);
+assert.match(contentScriptJs, /WEB_SHIORI_REFRESH_NOTES/);
+assert.match(contentScriptJs, /querySelectorAll\('\.web-shiori-note'\)/);
 assert.match(contentScriptJs, /!note.completed/);
 assert.match(contentScriptJs, /getSelectionPosition/);
 assert.match(contentScriptJs, /makeStickyNoteDraggable/);
 assert.match(contentScriptJs, /pointerdown/);
 assert.match(contentScriptJs, /updateNote\(note.id, \{ x, y, position \}\)/);
+assert.match(contentScriptJs, /getClampedNotePosition/);
 assert.match(contentScriptJs, /restoreScrollPosition/);
 assert.match(contentScriptJs, /scrollTo/);
 
 const popupHtml = readFileSync(join(extensionDir, 'popup.html'), 'utf8');
 assert.match(popupHtml, /id="notes"/);
+assert.match(popupHtml, /id="version"/);
 
 const popupJs = readFileSync(join(extensionDir, 'popup.js'), 'utf8');
 assert.match(popupJs, /getAllNotes/);
 assert.match(popupJs, /completed: true/);
+assert.match(popupJs, /refreshActiveTabNotes/);
+assert.match(popupJs, /WEB_SHIORI_REFRESH_NOTES/);
+assert.match(popupJs, /getManifest/);
 assert.match(popupJs, /position/);
 
 console.log('extension smoke test passed');
