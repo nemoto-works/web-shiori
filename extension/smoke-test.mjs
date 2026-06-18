@@ -6,7 +6,7 @@ const extensionDir = new URL('.', import.meta.url).pathname;
 const manifest = JSON.parse(readFileSync(join(extensionDir, 'manifest.json'), 'utf8'));
 
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, '0.1.1');
+assert.equal(manifest.version, '0.1.2');
 assert.equal(manifest.action.default_popup, 'popup.html');
 assert.ok(manifest.permissions.includes('storage'));
 assert.ok(manifest.permissions.includes('tabs'));
@@ -34,15 +34,25 @@ assert.match(contentScriptJs, /updateNote\(note.id, \{ x, y, position \}\)/);
 assert.match(contentScriptJs, /getClampedNotePosition/);
 assert.match(contentScriptJs, /restoreScrollPosition/);
 assert.match(contentScriptJs, /scrollTo/);
+assert.match(contentScriptJs, /restoreScroll = true/);
+assert.match(contentScriptJs, /renderStickyNotes\(\{ restoreScroll: false \}\)/);
 
 const popupHtml = readFileSync(join(extensionDir, 'popup.html'), 'utf8');
 assert.match(popupHtml, /id="notes"/);
 assert.match(popupHtml, /id="version"/);
+assert.match(popupHtml, /width:380px/);
+assert.match(popupHtml, /note-card-button/);
+assert.match(popupHtml, /note-title/);
+assert.match(popupHtml, /note-url/);
 
 const popupJs = readFileSync(join(extensionDir, 'popup.js'), 'utf8');
 assert.match(popupJs, /getAllNotes/);
 assert.match(popupJs, /completed: true/);
-assert.match(popupJs, /refreshActiveTabNotes/);
+assert.match(popupJs, /refreshTabsForUrl/);
+assert.match(popupJs, /getMatchingTabs/);
+assert.match(popupJs, /openOrFocusNoteUrl/);
+assert.match(popupJs, /chrome\.tabs\.create/);
+assert.match(popupJs, /chrome\.tabs\.update/);
 assert.match(popupJs, /WEB_SHIORI_REFRESH_NOTES/);
 assert.match(popupJs, /getManifest/);
 assert.match(popupJs, /position/);

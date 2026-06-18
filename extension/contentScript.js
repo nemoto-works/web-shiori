@@ -177,7 +177,7 @@ function restoreScrollPosition(notes) {
   });
 }
 
-async function renderStickyNotes() {
+async function renderStickyNotes({ restoreScroll = true } = {}) {
   document.querySelectorAll('.web-shiori-note').forEach((noteEl) => noteEl.remove());
 
   const storage = window.webShioriStorage;
@@ -185,7 +185,7 @@ async function renderStickyNotes() {
 
   const notes = await storage.getNotesForUrl(window.location.href);
   const activeNotes = (notes || []).filter((note) => !note.completed);
-  restoreScrollPosition(activeNotes);
+  if (restoreScroll) restoreScrollPosition(activeNotes);
   activeNotes.forEach((note, index) => {
     document.body.appendChild(createStickyNote(note, index));
   });
@@ -193,7 +193,7 @@ async function renderStickyNotes() {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'WEB_SHIORI_REFRESH_NOTES') {
-    renderStickyNotes()
+    renderStickyNotes({ restoreScroll: false })
       .then(() => sendResponse({ ok: true }))
       .catch(() => sendResponse({ ok: false }));
     return true;

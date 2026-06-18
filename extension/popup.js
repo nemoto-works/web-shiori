@@ -38,14 +38,48 @@ async function getPageContext(tab) {
   }
 }
 
-async function refreshActiveTabNotes(tab) {
+async function sendRefreshMessage(tab) {
   if (!tab?.id) return;
 
   try {
     await chrome.tabs.sendMessage(tab.id, { type: 'WEB_SHIORI_REFRESH_NOTES' });
   } catch (error) {
-    // The active tab may not have the content script, such as browser internal pages.
+    // The target tab may not have the content script, such as browser internal pages.
   }
+}
+
+function urlsMatch(leftUrl, rightUrl) {
+  if (!leftUrl || !rightUrl) return false;
+
+  const normalizeUrl = window.webShioriStorage?.normalizeUrl || ((url) => url);
+  return normalizeUrl(leftUrl) === normalizeUrl(rightUrl);
+}
+
+async function getMatchingTabs(url) {
+  if (!url) return [];
+
+  const tabs = await chrome.tabs.query({});
+  return tabs.filter((tab) => urlsMatch(tab.url, url));
+}
+
+async function refreshTabsForUrl(url) {
+  const tabs = await getMatchingTabs(url);
+  await Promise.all(tabs.map((tab) => sendRefreshMessage(tab)));
+}
+
+async function openOrFocusNoteUrl(note) {
+  if (!note?.url) return;
+
+  const [matchingTab] = await getMatchingTabs(note.url);
+  if (matchingTab?.id) {
+    await chrome.tabs.update(matchingTab.id, { active: true });
+    if (matchingTab.windowId !== undefined) {
+      await chrome.windows.update(matchingTab.windowId, { focused: true });
+    }
+    return;
+  }
+
+  await chrome.tabs.create({ url: note.url });
 }
 
 function renderVersion() {
@@ -56,35 +90,59 @@ function renderVersion() {
   versionEl.textContent = `v${manifest.version}`;
 }
 
-function formatPageContext(note) {
-  return note.title || note.url || 'ページ情報なし';
+function formatPageTitle(note) {
+  return note.title || 'タイトルなし';
 }
 
-function createNoteItem(note, onComplete) {
+function formatPageUrl(note) {
+  return note.url || 'URLなし';
+}
+
+function createNoteItem(note, onComplete, onOpen) {
   const item = document.createElement('li');
   item.className = `note-item${note.completed ? ' note-item--completed' : ''}`;
+
+  const openButton = document.createElement('button');
+  openButton.type = 'button';
+  openButton.className = 'note-card-button';
+  openButton.title = note.url ? `${formatPageTitle(note)}\n${note.url}` : formatPageTitle(note);
+  openButton.addEventListener('click', () => onOpen(note));
 
   const text = document.createElement('p');
   text.className = 'note-text';
   text.textContent = note.text;
 
-  const context = document.createElement('p');
-  context.className = 'note-context';
-  context.textContent = formatPageContext(note);
+  const meta = document.createElement('div');
+  meta.className = 'note-meta';
 
-  item.append(text, context);
+  const title = document.createElement('p');
+  title.className = 'note-title';
+  title.textContent = formatPageTitle(note);
+  title.title = formatPageTitle(note);
+
+  const url = document.createElement('p');
+  url.className = 'note-url';
+  url.textContent = formatPageUrl(note);
+  url.title = formatPageUrl(note);
+
+  meta.append(title, url);
+  openButton.append(text, meta);
+  item.appendChild(openButton);
 
   if (!note.completed) {
     const completeButton = document.createElement('button');
     completeButton.type = 'button';
     completeButton.className = 'complete-button';
     completeButton.textContent = '完了にする';
-    completeButton.addEventListener('click', () => onComplete(note.id));
-    item.appendChild(completeButton);
+    completeButton.addEventListener('click', () => onComplete(note));
+    const actions = document.createElement('div');
+    actions.className = 'note-actions';
+    actions.appendChild(completeButton);
+    item.appendChild(actions);
   } else {
     const completed = document.createElement('p');
     completed.className = 'note-completed-label';
-    completed.textContent = '完了済み';
+    completed.textContent = '✓ 完了済み';
     item.appendChild(completed);
   }
 
@@ -109,12 +167,11 @@ async function renderNotes() {
   }
 
   sortedNotes.forEach((note) => {
-    list.appendChild(createNoteItem(note, async (id) => {
-      const tab = await getActiveTab();
-      await window.webShioriStorage.updateNote(id, { completed: true });
-      await refreshActiveTabNotes(tab);
+    list.appendChild(createNoteItem(note, async (targetNote) => {
+      await window.webShioriStorage.updateNote(targetNote.id, { completed: true });
+      await refreshTabsForUrl(targetNote.url);
       await renderNotes();
-    }));
+    }, openOrFocusNoteUrl));
   });
 
   status.textContent = `${sortedNotes.length}件の付箋を表示中`;
@@ -144,7 +201,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     textarea.value = '';
-    await refreshActiveTabNotes(tab);
+    await refreshTabsForUrl(pageContext.url);
     await renderNotes();
   });
 
