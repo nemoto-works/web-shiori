@@ -219,6 +219,69 @@ function noteMatchesCurrentPageContent(note, pageMatchText = getCurrentPageMatch
   return pageMatchText.includes(selectedText);
 }
 
+
+function findElementContainingText(searchText) {
+  const normalizedSearchText = normalizeMatchText(searchText);
+  if (!normalizedSearchText || !document.body) return null;
+
+  const slackMessageSelector = '[data-qa="message_container"], [data-qa="virtual-list-item"], [data-ts], [data-message-ts]';
+  const slackMessages = Array.from(document.querySelectorAll(slackMessageSelector));
+  const matchingSlackMessage = slackMessages.find((element) => normalizeMatchText(element.innerText || element.textContent || '').includes(normalizedSearchText));
+  if (matchingSlackMessage) return matchingSlackMessage;
+
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!normalizeMatchText(node.textContent).includes(normalizedSearchText)) return NodeFilter.FILTER_REJECT;
+      if (node.parentElement?.closest?.('.web-shiori-note, #web-shiori-quick-entry, script, style, noscript')) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+
+  const matchingTextNode = walker.nextNode();
+  if (!matchingTextNode) return null;
+
+  return matchingTextNode.parentElement?.closest?.('p, li, article, section, div, span') || matchingTextNode.parentElement || null;
+}
+
+function getPositionNearElement(element, fallbackPosition) {
+  const rect = element?.getBoundingClientRect?.();
+  if (!rect || (rect.width === 0 && rect.height === 0)) return fallbackPosition;
+
+  const margin = 16;
+  return {
+    ...fallbackPosition,
+    x: clamp(rect.left, margin, Math.max(window.innerWidth - 280, margin)),
+    y: clamp(rect.bottom + 8, margin, Math.max(window.innerHeight - 120, margin)),
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+  };
+}
+
+function resolveRenderableNote(note, index, { restoreScroll = true } = {}) {
+  const selectedText = getNoteSelectedText(note);
+  if (!normalizeMatchText(selectedText)) return { note, anchorElement: null };
+
+  const anchorElement = findElementContainingText(selectedText);
+  if (!anchorElement) return null;
+
+  if (restoreScroll) {
+    anchorElement.scrollIntoView?.({ block: 'center', inline: 'nearest', behavior: 'instant' });
+  }
+
+  const fallbackPosition = getNotePosition(note, index);
+  return {
+    note: {
+      ...note,
+      position: getPositionNearElement(anchorElement, fallbackPosition),
+    },
+    anchorElement,
+  };
+}
+
 function makeStickyNoteDraggable(el, note, initialPosition, onClickWithoutDrag) {
   const storage = window.webShioriStorage;
   if (!storage?.updateNote || !note.id) return;
@@ -424,8 +487,11 @@ async function renderStickyNotes({ restoreScroll = true } = {}) {
     const notes = await storage.getNotesForUrl(window.location.href);
     const pageMatchText = getCurrentPageMatchText();
     const activeNotes = (notes || []).filter((note) => !note.completed && noteMatchesCurrentPageContent(note, pageMatchText));
-    if (restoreScroll) restoreScrollPosition(activeNotes);
-    activeNotes.forEach((note, index) => {
+    const renderableNotes = activeNotes
+      .map((note, index) => resolveRenderableNote(note, index, { restoreScroll }))
+      .filter(Boolean);
+    if (restoreScroll && renderableNotes.every(({ anchorElement }) => !anchorElement)) restoreScrollPosition(activeNotes);
+    renderableNotes.forEach(({ note }, index) => {
       document.body.appendChild(createStickyNote(note, index));
     });
   } finally {
