@@ -6,6 +6,39 @@ let lastContentAwareRefreshAt = 0;
 const CONTENT_AWARE_REFRESH_DEBOUNCE_MS = 350;
 const CONTENT_AWARE_REFRESH_THROTTLE_MS = 1000;
 
+const SLACK_PERMALINK_ATTRIBUTES = [
+  'data-qa-permalink',
+  'data-message-permalink',
+  'data-permalink',
+  'data-thread-permalink',
+  'data-activity-permalink',
+  'data-item-permalink',
+  'data-qa-message_permalink',
+];
+const SLACK_PERMALINK_SELECTOR = `a[href], ${SLACK_PERMALINK_ATTRIBUTES.map((attr) => `[${attr}]`).join(', ')}`;
+const SLACK_ACTIVITY_CONTAINER_SELECTOR = [
+  '[data-qa="activity_feed_item"]',
+  '[data-qa="activity-item"]',
+  '[data-qa="activity_page_item"]',
+  '[data-qa="activity_page_list_item"]',
+  '[data-qa="activity_feed_item_message"]',
+  '[role="listitem"][data-item-key*="activity" i]',
+  '[aria-label*="Activity" i]',
+  '[class*="activity" i]',
+].join(', ');
+const SLACK_ACTIVITY_PERMALINK_SELECTOR = [
+  'a[data-qa*="permalink" i][href]',
+  'a[aria-label*="permalink" i][href]',
+  'a[aria-label*="jump" i][href]',
+  'a[aria-label*="open" i][href]',
+  'a[title*="permalink" i][href]',
+  'a[title*="jump" i][href]',
+  'a[title*="open" i][href]',
+  'a[href*="/archives/"]',
+  'a[href*="/client/"]',
+  ...SLACK_PERMALINK_ATTRIBUTES.map((attr) => `[${attr}]`),
+].join(', ');
+
 function getDialogPositionFromPoint(clientX, clientY) {
   const margin = 16;
   const dialogWidth = Math.min(360, Math.max(window.innerWidth - 32, 0));
@@ -81,18 +114,17 @@ function isSlackNavigableMessageUrl(url) {
 function getSlackUrlFromElement(element) {
   if (!element?.closest) return null;
 
-  const candidateAttributes = ['data-qa-permalink', 'data-message-permalink', 'data-permalink', 'data-thread-permalink', 'href'];
   const candidateElements = [
     element.closest('a[href]'),
     element,
-    ...(element.querySelectorAll?.('a[href], [data-qa-permalink], [data-message-permalink], [data-permalink], [data-thread-permalink]') || []),
+    ...(element.querySelectorAll?.(SLACK_PERMALINK_SELECTOR) || []),
   ].filter(Boolean);
 
   for (const candidate of candidateElements) {
     const href = candidate.href || candidate.getAttribute?.('href');
     if (href && isSlackNavigableMessageUrl(href)) return new URL(href, window.location.href).href;
 
-    for (const attr of candidateAttributes) {
+    for (const attr of SLACK_PERMALINK_ATTRIBUTES) {
       const value = candidate.getAttribute?.(attr);
       if (value && isSlackNavigableMessageUrl(value)) return new URL(value, window.location.href).href;
     }
@@ -102,25 +134,40 @@ function getSlackUrlFromElement(element) {
 }
 
 function findSlackActivityContainer(element) {
-  return element?.closest?.('[data-qa=\"activity_feed_item\"], [data-qa=\"activity-item\"], [data-qa=\"activity_page_item\"], [aria-label*=\"Activity\" i], [class*=\"activity\" i]') || null;
+  return element?.closest?.(SLACK_ACTIVITY_CONTAINER_SELECTOR) || null;
 }
 
 function findSlackChannelContainer(element) {
   return element?.closest?.('[data-qa=\"message_container\"], [data-qa=\"virtual-list-item\"], [data-ts], [data-message-ts], [data-channel-id], [role=\"listitem\"]') || null;
 }
 
+function getSlackCandidateUrl(candidate) {
+  const href = candidate?.href || candidate?.getAttribute?.('href');
+  if (href && isSlackNavigableMessageUrl(href)) return new URL(href, window.location.href).href;
+
+  for (const attr of SLACK_PERMALINK_ATTRIBUTES) {
+    const value = candidate?.getAttribute?.(attr);
+    if (value && isSlackNavigableMessageUrl(value)) return new URL(value, window.location.href).href;
+  }
+
+  return null;
+}
+
 function findSlackActivityTargetUrlFromElement(element) {
   const activityContainer = findSlackActivityContainer(element);
   if (!activityContainer) return null;
 
-  const directUrl = getSlackUrlFromElement(activityContainer);
-  if (directUrl) return directUrl;
+  const activityPermalinkCandidates = [
+    activityContainer.closest?.(SLACK_ACTIVITY_PERMALINK_SELECTOR),
+    ...Array.from(activityContainer.querySelectorAll?.(SLACK_ACTIVITY_PERMALINK_SELECTOR) || []),
+  ].filter(Boolean);
 
-  const navigableLink = Array.from(activityContainer.querySelectorAll?.('a[href]') || [])
-    .map((link) => link.href || link.getAttribute('href'))
-    .find((href) => href && isSlackNavigableMessageUrl(href));
+  for (const candidate of activityPermalinkCandidates) {
+    const activityPermalink = getSlackCandidateUrl(candidate);
+    if (activityPermalink) return activityPermalink;
+  }
 
-  return navigableLink ? new URL(navigableLink, window.location.href).href : null;
+  return getSlackUrlFromElement(activityContainer);
 }
 
 function findSlackTargetUrlFromSelection() {
@@ -142,7 +189,7 @@ function findSlackTargetUrlFromSelection() {
       element,
       findSlackActivityContainer(element),
       findSlackChannelContainer(element),
-      element.closest?.('[data-qa-permalink], [data-message-permalink], [data-permalink], [data-thread-permalink]'),
+      element.closest?.(SLACK_PERMALINK_SELECTOR),
       element.closest?.('a[href]'),
     ])
     .filter(Boolean);
