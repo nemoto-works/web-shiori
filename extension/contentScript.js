@@ -46,6 +46,79 @@ function getQuickEntryFallbackPosition() {
 document.addEventListener('pointerdown', rememberInteractionPosition, { capture: true, passive: true });
 document.addEventListener('click', rememberInteractionPosition, { capture: true, passive: true });
 
+
+function isSlackWebPage(url = window.location.href) {
+  try {
+    const { hostname } = new URL(url);
+    return hostname === 'app.slack.com' || hostname.endsWith('.slack.com');
+  } catch (error) {
+    return false;
+  }
+}
+
+function isSlackNavigableMessageUrl(url) {
+  try {
+    const parsed = new URL(url, window.location.href);
+    if (!isSlackWebPage(parsed.href)) return false;
+
+    const path = parsed.pathname;
+    const isWorkspaceArchivePermalink = parsed.hostname !== 'app.slack.com'
+      && parsed.hostname.endsWith('.slack.com')
+      && /\/archives\/[A-Z0-9]+\/p\d{10,}(?:$|[/?#])/i.test(path);
+    const isAppClientMessageLink = parsed.hostname === 'app.slack.com'
+      && /\/client\/[A-Z0-9]+\/[A-Z0-9]+(?:\/thread\/[A-Z0-9]+-\d{10,})?(?:$|[/?#])/i.test(path);
+
+    return isWorkspaceArchivePermalink || isAppClientMessageLink;
+  } catch (error) {
+    return false;
+  }
+}
+
+function getSlackUrlFromElement(element) {
+  if (!element?.closest) return null;
+
+  const link = element.closest('a[href]') || element.querySelector?.('a[href*="/archives/"], a[href*="/client/"]');
+  if (link?.href && isSlackNavigableMessageUrl(link.href)) return link.href;
+
+  const candidateAttributes = ['data-qa-permalink', 'data-message-permalink', 'data-permalink', 'href'];
+  for (const attr of candidateAttributes) {
+    const value = element.getAttribute?.(attr);
+    if (value && isSlackNavigableMessageUrl(value)) return new URL(value, window.location.href).href;
+  }
+
+  return null;
+}
+
+function findSlackTargetUrlFromSelection() {
+  if (!isSlackWebPage()) return null;
+
+  const selection = window.getSelection?.();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+
+  const range = selection.getRangeAt(0);
+  const start = range.startContainer?.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer?.parentElement;
+  const end = range.endContainer?.nodeType === Node.ELEMENT_NODE ? range.endContainer : range.endContainer?.parentElement;
+  const common = range.commonAncestorContainer?.nodeType === Node.ELEMENT_NODE
+    ? range.commonAncestorContainer
+    : range.commonAncestorContainer?.parentElement;
+
+  const candidates = [start, end, common]
+    .filter(Boolean)
+    .flatMap((element) => [
+      element,
+      element.closest?.('[data-qa="message_container"], [data-qa="virtual-list-item"], [data-ts], [data-message-ts], [data-channel-id]'),
+      element.closest?.('a[href]'),
+    ])
+    .filter(Boolean);
+
+  for (const candidate of candidates) {
+    const targetUrl = getSlackUrlFromElement(candidate);
+    if (targetUrl) return targetUrl;
+  }
+
+  return null;
+}
+
 function getSelectionPosition() {
   const selection = window.getSelection?.();
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
@@ -66,6 +139,7 @@ function getSelectionPosition() {
     viewportHeight: window.innerHeight,
     selectedText: selection.toString().slice(0, 120),
     selectionText: selection.toString().slice(0, 120),
+    targetUrl: findSlackTargetUrlFromSelection() || undefined,
     selectionRect: {
       left: rect.left,
       top: rect.top,
@@ -143,6 +217,69 @@ function noteMatchesCurrentPageContent(note, pageMatchText = getCurrentPageMatch
   if (!selectedText) return true;
 
   return pageMatchText.includes(selectedText);
+}
+
+
+function findElementContainingText(searchText) {
+  const normalizedSearchText = normalizeMatchText(searchText);
+  if (!normalizedSearchText || !document.body) return null;
+
+  const slackMessageSelector = '[data-qa="message_container"], [data-qa="virtual-list-item"], [data-ts], [data-message-ts]';
+  const slackMessages = Array.from(document.querySelectorAll(slackMessageSelector));
+  const matchingSlackMessage = slackMessages.find((element) => normalizeMatchText(element.innerText || element.textContent || '').includes(normalizedSearchText));
+  if (matchingSlackMessage) return matchingSlackMessage;
+
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!normalizeMatchText(node.textContent).includes(normalizedSearchText)) return NodeFilter.FILTER_REJECT;
+      if (node.parentElement?.closest?.('.web-shiori-note, #web-shiori-quick-entry, script, style, noscript')) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+
+  const matchingTextNode = walker.nextNode();
+  if (!matchingTextNode) return null;
+
+  return matchingTextNode.parentElement?.closest?.('p, li, article, section, div, span') || matchingTextNode.parentElement || null;
+}
+
+function getPositionNearElement(element, fallbackPosition) {
+  const rect = element?.getBoundingClientRect?.();
+  if (!rect || (rect.width === 0 && rect.height === 0)) return fallbackPosition;
+
+  const margin = 16;
+  return {
+    ...fallbackPosition,
+    x: clamp(rect.left, margin, Math.max(window.innerWidth - 280, margin)),
+    y: clamp(rect.bottom + 8, margin, Math.max(window.innerHeight - 120, margin)),
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+  };
+}
+
+function resolveRenderableNote(note, index, { restoreScroll = true } = {}) {
+  const selectedText = getNoteSelectedText(note);
+  if (!normalizeMatchText(selectedText)) return { note, anchorElement: null };
+
+  const anchorElement = findElementContainingText(selectedText);
+  if (!anchorElement) return null;
+
+  if (restoreScroll) {
+    anchorElement.scrollIntoView?.({ block: 'center', inline: 'nearest', behavior: 'instant' });
+  }
+
+  const fallbackPosition = getNotePosition(note, index);
+  return {
+    note: {
+      ...note,
+      position: getPositionNearElement(anchorElement, fallbackPosition),
+    },
+    anchorElement,
+  };
 }
 
 function makeStickyNoteDraggable(el, note, initialPosition, onClickWithoutDrag) {
@@ -350,8 +487,11 @@ async function renderStickyNotes({ restoreScroll = true } = {}) {
     const notes = await storage.getNotesForUrl(window.location.href);
     const pageMatchText = getCurrentPageMatchText();
     const activeNotes = (notes || []).filter((note) => !note.completed && noteMatchesCurrentPageContent(note, pageMatchText));
-    if (restoreScroll) restoreScrollPosition(activeNotes);
-    activeNotes.forEach((note, index) => {
+    const renderableNotes = activeNotes
+      .map((note, index) => resolveRenderableNote(note, index, { restoreScroll }))
+      .filter(Boolean);
+    if (restoreScroll && renderableNotes.every(({ anchorElement }) => !anchorElement)) restoreScrollPosition(activeNotes);
+    renderableNotes.forEach(({ note }, index) => {
       document.body.appendChild(createStickyNote(note, index));
     });
   } finally {
@@ -406,6 +546,7 @@ async function saveQuickEntryNote(noteText, initialPosition = null) {
         scrollY: position.scrollY,
         viewportWidth: position.viewportWidth,
         viewportHeight: position.viewportHeight,
+        targetUrl: position.targetUrl,
       }
     : undefined;
 
@@ -416,6 +557,7 @@ async function saveQuickEntryNote(noteText, initialPosition = null) {
     x: position.x,
     y: position.y,
     position,
+    ...(position.targetUrl ? { targetUrl: position.targetUrl } : {}),
     ...(anchor ? { anchor } : {}),
     completed: false,
   });
