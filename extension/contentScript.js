@@ -70,10 +70,33 @@ function isSlackNavigableMessageUrl(url) {
   }
 }
 
+function getSlackCurrentWorkspaceMessageUrl(channel, timestamp) {
+  if (!channel || !timestamp || !/^\d+(?:\.\d+)?$/.test(timestamp)) return null;
+
+  const timestampId = timestamp.replace('.', '').padEnd(16, '0');
+  try {
+    const currentUrl = new URL(window.location.href);
+    if (!isSlackWebPage(currentUrl.href)) return null;
+
+    const clientWorkspace = currentUrl.pathname.match(/^\/client\/([^/]+)\//i)?.[1];
+    if (currentUrl.hostname === 'app.slack.com' && clientWorkspace) {
+      return new URL(`/client/${clientWorkspace}/${channel}/thread/${channel}-${timestampId}`, currentUrl.origin).href;
+    }
+
+    if (currentUrl.hostname !== 'app.slack.com' && currentUrl.hostname.endsWith('.slack.com')) {
+      return new URL(`/archives/${channel}/p${timestampId}`, currentUrl.origin).href;
+    }
+  } catch (error) {
+    return null;
+  }
+
+  return null;
+}
+
 function getSlackUrlFromElement(element) {
   if (!element?.closest) return null;
 
-  const link = element.closest('a[href]') || element.querySelector?.('a[href*="/archives/"]');
+  const link = element.closest('a[href]') || element.querySelector?.('a[href*="/archives/"], a[href*="/client/"]');
   if (link?.href && isSlackNavigableMessageUrl(link.href)) return link.href;
 
   const candidateAttributes = ['data-qa-permalink', 'data-message-permalink', 'data-permalink', 'href'];
@@ -88,13 +111,10 @@ function getSlackUrlFromElement(element) {
     || element.closest?.('[data-ts], [data-message-ts]')?.getAttribute?.('data-message-ts');
   const channel = element.getAttribute?.('data-channel-id')
     || element.closest?.('[data-channel-id]')?.getAttribute?.('data-channel-id')
-    || window.location.pathname.match(/\/archives\/([A-Z0-9]+)/i)?.[1];
+    || window.location.pathname.match(/\/archives\/([A-Z0-9]+)/i)?.[1]
+    || window.location.pathname.match(/^\/client\/[^/]+\/([A-Z0-9]+)/i)?.[1];
 
-  if (channel && timestamp && /^\d+(?:\.\d+)?$/.test(timestamp)) {
-    return new URL(`/archives/${channel}/p${timestamp.replace('.', '').padEnd(16, '0')}`, window.location.origin).href;
-  }
-
-  return null;
+  return getSlackCurrentWorkspaceMessageUrl(channel, timestamp);
 }
 
 function findSlackTargetUrlFromSelection() {
