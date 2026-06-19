@@ -1,6 +1,8 @@
 let latestInteractionPosition = null;
 let contentAwareRefreshTimer = null;
 let isRenderingStickyNotes = false;
+let currentStickyNoteRenderSignature = '';
+const STICKY_NOTE_DRAG_THRESHOLD_PX = 4;
 
 function getDialogPositionFromPoint(clientX, clientY) {
   const margin = 16;
@@ -282,6 +284,18 @@ function resolveRenderableNote(note, index, { restoreScroll = true } = {}) {
   };
 }
 
+function getStickyNoteRenderSignature(renderableNotes) {
+  return JSON.stringify(renderableNotes.map(({ note }) => ({
+    id: note.id,
+    text: note.text,
+    completed: Boolean(note.completed),
+    x: note.position?.x ?? note.x,
+    y: note.position?.y ?? note.y,
+    selectedText: getNoteSelectedText(note),
+    targetUrl: note.targetUrl || note.anchor?.targetUrl || '',
+  })));
+}
+
 function makeStickyNoteDraggable(el, note, initialPosition, onClickWithoutDrag) {
   const storage = window.webShioriStorage;
   if (!storage?.updateNote || !note.id) return;
@@ -314,8 +328,12 @@ function makeStickyNoteDraggable(el, note, initialPosition, onClickWithoutDrag) 
   const onPointerMove = (event) => {
     if (event.buttons === 0) return;
 
-    const nextLeft = startLeft + event.clientX - startPointerX;
-    const nextTop = startTop + event.clientY - startPointerY;
+    const deltaX = event.clientX - startPointerX;
+    const deltaY = event.clientY - startPointerY;
+    if (!moved && Math.hypot(deltaX, deltaY) < STICKY_NOTE_DRAG_THRESHOLD_PX) return;
+
+    const nextLeft = startLeft + deltaX;
+    const nextTop = startTop + deltaY;
     const maxLeft = Math.max(window.innerWidth - el.offsetWidth - 8, 8);
     const maxTop = Math.max(window.innerHeight - el.offsetHeight - 8, 8);
 
@@ -479,8 +497,6 @@ function restoreScrollPosition(notes) {
 async function renderStickyNotes({ restoreScroll = true } = {}) {
   isRenderingStickyNotes = true;
   try {
-    document.querySelectorAll('.web-shiori-note').forEach((noteEl) => noteEl.remove());
-
     const storage = window.webShioriStorage;
     if (!storage?.getNotesForUrl) return;
 
@@ -491,9 +507,15 @@ async function renderStickyNotes({ restoreScroll = true } = {}) {
       .map((note, index) => resolveRenderableNote(note, index, { restoreScroll }))
       .filter(Boolean);
     if (restoreScroll && renderableNotes.every(({ anchorElement }) => !anchorElement)) restoreScrollPosition(activeNotes);
+
+    const nextRenderSignature = getStickyNoteRenderSignature(renderableNotes);
+    if (nextRenderSignature === currentStickyNoteRenderSignature) return;
+
+    document.querySelectorAll('.web-shiori-note').forEach((noteEl) => noteEl.remove());
     renderableNotes.forEach(({ note }, index) => {
       document.body.appendChild(createStickyNote(note, index));
     });
+    currentStickyNoteRenderSignature = nextRenderSignature;
   } finally {
     isRenderingStickyNotes = false;
   }
