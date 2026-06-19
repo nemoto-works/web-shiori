@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "web-shiori",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Chrome extension: save next actions per URL + page position.",
   "permissions": [
     "storage",

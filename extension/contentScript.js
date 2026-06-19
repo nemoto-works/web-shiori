@@ -38,7 +38,17 @@ const SLACK_ACTIVITY_CONTAINER_SELECTOR = [
   '[aria-label*="Activity" i]',
   '[class*="activity" i]',
 ].join(', ');
+const SLACK_TIMESTAMP_PERMALINK_SELECTOR = [
+  'a.c-timestamp[href*="/archives/"]',
+  'a[data-qa*="timestamp" i][href*="/archives/"]',
+  'a[aria-label*="timestamp" i][href*="/archives/"]',
+  'a[title*="timestamp" i][href*="/archives/"]',
+  'time a[href*="/archives/"]',
+  'a[href*="/archives/"][href*="thread_ts="]',
+].join(', ');
+
 const SLACK_ACTIVITY_PERMALINK_SELECTOR = [
+  SLACK_TIMESTAMP_PERMALINK_SELECTOR,
   'a[data-qa*="original" i][href*="/archives/"]',
   'a[data-qa*="original" i][href*="/client/"]',
   'a[data-qa*="permalink" i][href]:not([href*="/activity"])',
@@ -189,6 +199,22 @@ function getSlackCandidateUrl(candidate, { activitySource = false } = {}) {
   return null;
 }
 
+function findSlackTimestampPermalinkFromElement(element) {
+  if (!element?.closest) return null;
+
+  const timestampCandidates = [
+    element.closest(SLACK_TIMESTAMP_PERMALINK_SELECTOR),
+    ...(element.querySelectorAll?.(SLACK_TIMESTAMP_PERMALINK_SELECTOR) || []),
+  ].filter(Boolean);
+
+  for (const candidate of timestampCandidates) {
+    const timestampPermalink = getSlackCandidateUrl(candidate);
+    if (timestampPermalink) return timestampPermalink;
+  }
+
+  return null;
+}
+
 function isSlackActivitySourceCandidate(candidate) {
   return SLACK_ACTIVITY_SOURCE_PERMALINK_ATTRIBUTES.some((attr) => candidate?.hasAttribute?.(attr));
 }
@@ -201,17 +227,21 @@ function getSlackCandidateScore(candidate) {
     candidate?.className,
   ].join(' ').toLowerCase();
 
-  if (/original.*thread|thread.*original/.test(descriptor)) return 0;
-  if (/original.*message|message.*original/.test(descriptor)) return 1;
-  if (/thread/.test(descriptor)) return 2;
-  if (/message|permalink|jump|open|channel/.test(descriptor)) return 3;
+  if (/timestamp/.test(descriptor) || candidate?.matches?.(SLACK_TIMESTAMP_PERMALINK_SELECTOR)) return 0;
+  if (/original.*thread|thread.*original/.test(descriptor)) return 1;
+  if (/original.*message|message.*original/.test(descriptor)) return 2;
+  if (/thread/.test(descriptor)) return 3;
+  if (/message|permalink|jump|open|channel/.test(descriptor)) return 4;
   if (isSlackActivitySourceCandidate(candidate)) return 9;
-  return 4;
+  return 5;
 }
 
 function findSlackActivityTargetUrlFromElement(element) {
   const activityContainer = findSlackActivityContainer(element);
   if (!activityContainer) return null;
+
+  const timestampPermalink = findSlackTimestampPermalinkFromElement(activityContainer);
+  if (timestampPermalink) return timestampPermalink;
 
   const activityPermalinkCandidates = [
     activityContainer.closest?.(SLACK_ACTIVITY_PERMALINK_SELECTOR),
@@ -264,6 +294,9 @@ function findSlackTargetUrlFromSelection() {
     .filter(Boolean);
 
   for (const candidate of candidates) {
+    const timestampPermalink = findSlackTimestampPermalinkFromElement(candidate);
+    if (timestampPermalink) return timestampPermalink;
+
     const targetUrl = getSlackUrlFromElement(candidate);
     if (targetUrl) return targetUrl;
   }
