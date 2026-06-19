@@ -1,4 +1,16 @@
 const EMPTY_LIST_MESSAGE = '保存された付箋はありません。';
+const EMPTY_FILTER_MESSAGES = {
+  active: '未完了の付箋はありません。',
+  completed: '完了済みの付箋はありません。',
+  all: EMPTY_LIST_MESSAGE,
+};
+const TAB_LABELS = {
+  active: '未完了',
+  completed: '完了',
+  all: 'すべて',
+};
+
+let currentNoteFilter = 'active';
 
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -173,13 +185,43 @@ function createNoteItem(note, onComplete, onOpen) {
   return item;
 }
 
+function splitNotesByStatus(notes) {
+  return {
+    active: notes.filter((note) => !note.completed),
+    completed: notes.filter((note) => note.completed),
+  };
+}
+
+function getVisibleNotesByFilter(notesByStatus, filter) {
+  if (filter === 'completed') return notesByStatus.completed;
+  if (filter === 'all') return [...notesByStatus.active, ...notesByStatus.completed];
+  return notesByStatus.active;
+}
+
+function updateTabLabels(notesByStatus) {
+  const counts = {
+    active: notesByStatus.active.length,
+    completed: notesByStatus.completed.length,
+    all: notesByStatus.active.length + notesByStatus.completed.length,
+  };
+
+  document.querySelectorAll('.note-tab').forEach((tab) => {
+    const filter = tab.dataset.filter;
+    tab.textContent = `${TAB_LABELS[filter]} ${counts[filter]}`;
+    tab.setAttribute('aria-selected', String(filter === currentNoteFilter));
+  });
+}
+
 async function renderNotes() {
   const list = document.getElementById('notes');
   const status = document.getElementById('status');
   const notes = await window.webShioriStorage.getAllNotes();
   const sortedNotes = [...notes].sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+  const notesByStatus = splitNotesByStatus(sortedNotes);
+  const visibleNotes = getVisibleNotesByFilter(notesByStatus, currentNoteFilter);
 
   list.replaceChildren();
+  updateTabLabels(notesByStatus);
 
   if (sortedNotes.length === 0) {
     const empty = document.createElement('li');
@@ -190,7 +232,16 @@ async function renderNotes() {
     return;
   }
 
-  sortedNotes.forEach((note) => {
+  if (visibleNotes.length === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'empty-notes';
+    empty.textContent = EMPTY_FILTER_MESSAGES[currentNoteFilter];
+    list.appendChild(empty);
+    status.textContent = `${TAB_LABELS[currentNoteFilter]} 0件`;
+    return;
+  }
+
+  visibleNotes.forEach((note) => {
     list.appendChild(createNoteItem(note, async (targetNote) => {
       await window.webShioriStorage.updateNote(targetNote.id, { completed: true });
       await refreshTabsForUrl(targetNote.url);
@@ -198,12 +249,20 @@ async function renderNotes() {
     }, openOrFocusNoteUrl));
   });
 
-  status.textContent = `${sortedNotes.length}件の付箋を表示中`;
+  status.textContent = `${TAB_LABELS[currentNoteFilter]} ${visibleNotes.length}件 / 全${sortedNotes.length}件`;
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
   const textarea = document.getElementById('note');
   const saveButton = document.getElementById('save');
+  const noteTabs = document.querySelectorAll('.note-tab');
+
+  noteTabs.forEach((tab) => {
+    tab.addEventListener('click', async () => {
+      currentNoteFilter = tab.dataset.filter || 'active';
+      await renderNotes();
+    });
+  });
 
   saveButton.addEventListener('click', async () => {
     const noteText = (textarea.value || '').trim();
