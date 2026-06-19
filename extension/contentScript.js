@@ -6,17 +6,26 @@ let lastContentAwareRefreshAt = 0;
 const CONTENT_AWARE_REFRESH_DEBOUNCE_MS = 350;
 const CONTENT_AWARE_REFRESH_THROTTLE_MS = 1000;
 
-const SLACK_PERMALINK_ATTRIBUTES = [
-  'data-qa-permalink',
-  'data-message-permalink',
-  'data-permalink',
-  'data-thread-permalink',
-  'data-activity-permalink',
-  'data-item-permalink',
-  'data-qa-message_permalink',
+const SLACK_ORIGINAL_MESSAGE_PERMALINK_ATTRIBUTES = [
   'data-original-message-permalink',
   'data-original-thread-permalink',
   'data-channel-message-permalink',
+  'data-message-permalink',
+  'data-thread-permalink',
+  'data-qa-message_permalink',
+];
+const SLACK_GENERIC_PERMALINK_ATTRIBUTES = [
+  'data-qa-permalink',
+  'data-permalink',
+  'data-item-permalink',
+];
+const SLACK_ACTIVITY_SOURCE_PERMALINK_ATTRIBUTES = [
+  'data-activity-permalink',
+];
+const SLACK_PERMALINK_ATTRIBUTES = [
+  ...SLACK_ORIGINAL_MESSAGE_PERMALINK_ATTRIBUTES,
+  ...SLACK_GENERIC_PERMALINK_ATTRIBUTES,
+  ...SLACK_ACTIVITY_SOURCE_PERMALINK_ATTRIBUTES,
 ];
 const SLACK_PERMALINK_SELECTOR = `a[href], ${SLACK_PERMALINK_ATTRIBUTES.map((attr) => `[${attr}]`).join(', ')}`;
 const SLACK_ACTIVITY_CONTAINER_SELECTOR = [
@@ -30,7 +39,9 @@ const SLACK_ACTIVITY_CONTAINER_SELECTOR = [
   '[class*="activity" i]',
 ].join(', ');
 const SLACK_ACTIVITY_PERMALINK_SELECTOR = [
-  'a[data-qa*="permalink" i][href]',
+  'a[data-qa*="original" i][href*="/archives/"]',
+  'a[data-qa*="original" i][href*="/client/"]',
+  'a[data-qa*="permalink" i][href]:not([href*="/activity"])',
   'a[data-qa*="message" i][href*="/archives/"]',
   'a[data-qa*="thread" i][href*="/archives/"]',
   'a[data-qa*="channel" i][href*="/archives/"]',
@@ -162,16 +173,24 @@ function isSlackActivityScreenUrl(url) {
   }
 }
 
-function getSlackCandidateUrl(candidate) {
+function getSlackCandidateUrl(candidate, { activitySource = false } = {}) {
   const href = candidate?.href || candidate?.getAttribute?.('href');
   if (href && !isSlackActivityScreenUrl(href) && isSlackNavigableMessageUrl(href)) return new URL(href, window.location.href).href;
 
-  for (const attr of SLACK_PERMALINK_ATTRIBUTES) {
+  const permalinkAttributes = activitySource
+    ? SLACK_ORIGINAL_MESSAGE_PERMALINK_ATTRIBUTES
+    : SLACK_PERMALINK_ATTRIBUTES;
+
+  for (const attr of permalinkAttributes) {
     const value = candidate?.getAttribute?.(attr);
     if (value && !isSlackActivityScreenUrl(value) && isSlackNavigableMessageUrl(value)) return new URL(value, window.location.href).href;
   }
 
   return null;
+}
+
+function isSlackActivitySourceCandidate(candidate) {
+  return SLACK_ACTIVITY_SOURCE_PERMALINK_ATTRIBUTES.some((attr) => candidate?.hasAttribute?.(attr));
 }
 
 function getSlackCandidateScore(candidate) {
@@ -182,9 +201,12 @@ function getSlackCandidateScore(candidate) {
     candidate?.className,
   ].join(' ').toLowerCase();
 
-  if (/thread/.test(descriptor)) return 0;
-  if (/message|permalink|jump|open|channel/.test(descriptor)) return 1;
-  return 2;
+  if (/original.*thread|thread.*original/.test(descriptor)) return 0;
+  if (/original.*message|message.*original/.test(descriptor)) return 1;
+  if (/thread/.test(descriptor)) return 2;
+  if (/message|permalink|jump|open|channel/.test(descriptor)) return 3;
+  if (isSlackActivitySourceCandidate(candidate)) return 9;
+  return 4;
 }
 
 function findSlackActivityTargetUrlFromElement(element) {
@@ -200,11 +222,11 @@ function findSlackActivityTargetUrlFromElement(element) {
     .sort((left, right) => getSlackCandidateScore(left) - getSlackCandidateScore(right));
 
   for (const candidate of activityPermalinkCandidates) {
-    const activityPermalink = getSlackCandidateUrl(candidate);
+    const activityPermalink = getSlackCandidateUrl(candidate, { activitySource: true });
     if (activityPermalink) return activityPermalink;
   }
 
-  return getSlackUrlFromElement(activityContainer);
+  return null;
 }
 
 function findSlackTargetUrlFromSelection() {
@@ -220,21 +242,26 @@ function findSlackTargetUrlFromSelection() {
     ? range.commonAncestorContainer
     : range.commonAncestorContainer?.parentElement;
 
-  const candidates = [start, end, common]
-    .filter(Boolean)
+  const selectionElements = [start, end, common].filter(Boolean);
+  const activityCandidates = selectionElements
+    .map((element) => findSlackActivityContainer(element))
+    .filter(Boolean);
+  if (activityCandidates.length > 0) {
+    for (const candidate of activityCandidates) {
+      const activityTargetUrl = findSlackActivityTargetUrlFromElement(candidate);
+      if (activityTargetUrl) return activityTargetUrl;
+    }
+    return null;
+  }
+
+  const candidates = selectionElements
     .flatMap((element) => [
       element,
-      findSlackActivityContainer(element),
       findSlackChannelContainer(element),
       element.closest?.(SLACK_PERMALINK_SELECTOR),
       element.closest?.('a[href]'),
     ])
     .filter(Boolean);
-
-  for (const candidate of candidates) {
-    const activityTargetUrl = findSlackActivityTargetUrlFromElement(candidate);
-    if (activityTargetUrl) return activityTargetUrl;
-  }
 
   for (const candidate of candidates) {
     const targetUrl = getSlackUrlFromElement(candidate);
