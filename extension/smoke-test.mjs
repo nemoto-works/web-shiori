@@ -6,7 +6,7 @@ const extensionDir = new URL('.', import.meta.url).pathname;
 const manifest = JSON.parse(readFileSync(join(extensionDir, 'manifest.json'), 'utf8'));
 
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, '0.1.4');
+assert.equal(manifest.version, '0.1.5');
 assert.equal(manifest.action.default_popup, 'popup.html');
 assert.ok(manifest.permissions.includes('storage'));
 assert.ok(manifest.permissions.includes('tabs'));
@@ -99,9 +99,18 @@ assert.match(popupHtml, /width:380px/);
 assert.match(popupHtml, /note-card-button/);
 assert.match(popupHtml, /note-title/);
 assert.match(popupHtml, /note-url/);
+assert.match(popupHtml, /role="tablist"/);
+assert.match(popupHtml, /data-filter="unfinished"/);
+assert.match(popupHtml, /data-filter="completed"/);
+assert.match(popupHtml, /data-filter="all"/);
+assert.match(popupHtml, /note-item--completed\{[^}]*opacity:\.74/);
 
 const popupJs = readFileSync(join(extensionDir, 'popup.js'), 'utf8');
 assert.match(popupJs, /getAllNotes/);
+assert.match(popupJs, /activeNoteFilter = 'unfinished'/);
+assert.match(popupJs, /getNoteGroups/);
+assert.match(popupJs, /updateTabs/);
+assert.match(popupJs, /FILTER_LABELS/);
 assert.match(popupJs, /completed: true/);
 assert.match(popupJs, /refreshTabsForUrl/);
 assert.match(popupJs, /getMatchingTabs/);

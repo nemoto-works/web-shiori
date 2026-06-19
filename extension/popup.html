@@ -19,9 +19,13 @@
     .section-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:18px 0 10px;}
     h4{margin:0;font-size:14px;line-height:1.3;}
     #status{color:#6b7280;font-size:12px;white-space:nowrap;}
+    .note-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:0 0 12px;}
+    .note-tab{padding:8px 6px;border:1px solid #d5d8e2;border-radius:999px;background:#fff;color:#4b5563;font-size:12px;font-weight:700;cursor:pointer;}
+    .note-tab:hover{background:#f9fafb;}
+    .note-tab[aria-selected="true"]{border-color:#2563eb;background:#eff6ff;color:#1d4ed8;box-shadow:0 1px 2px rgba(37,99,235,.12);}
     #notes{list-style:none;padding:0;margin:0;display:grid;gap:12px;max-height:430px;overflow:auto;}
     .note-item{display:grid;gap:10px;border:1px solid #e3e6ef;border-radius:14px;padding:12px;background:#fffdf4;box-shadow:0 1px 2px rgba(15,23,42,.06);}
-    .note-item--completed{background:#f3f4f6;border-color:#d9dde7;}
+    .note-item--completed{background:#f3f4f6;border-color:#d9dde7;box-shadow:none;opacity:.74;}
     .note-card-button{display:grid;gap:8px;width:100%;padding:0;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer;}
     .note-card-button:hover .note-text{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;}
     .note-text{margin:0;color:#111827;font-size:14px;font-weight:700;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;}
@@ -48,10 +52,15 @@
     </label>
     <button id="save" type="button">保存</button>
     <div class="section-header">
-      <h4>すべての付箋</h4>
+      <h4 id="notes-heading">付箋</h4>
       <div id="status"></div>
     </div>
-    <ul id="notes" aria-live="polite"></ul>
+    <nav class="note-tabs" role="tablist" aria-label="付箋の表示フィルター">
+      <button id="tab-unfinished" class="note-tab" type="button" role="tab" aria-selected="true" data-filter="unfinished">未完了</button>
+      <button id="tab-completed" class="note-tab" type="button" role="tab" aria-selected="false" data-filter="completed">完了</button>
+      <button id="tab-all" class="note-tab" type="button" role="tab" aria-selected="false" data-filter="all">すべて</button>
+    </nav>
+    <ul id="notes" aria-live="polite" aria-labelledby="notes-heading"></ul>
   </main>
   <script src="storage.js"></script>
   <script src="popup.js"></script>
