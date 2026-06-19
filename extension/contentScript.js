@@ -14,6 +14,9 @@ const SLACK_PERMALINK_ATTRIBUTES = [
   'data-activity-permalink',
   'data-item-permalink',
   'data-qa-message_permalink',
+  'data-original-message-permalink',
+  'data-original-thread-permalink',
+  'data-channel-message-permalink',
 ];
 const SLACK_PERMALINK_SELECTOR = `a[href], ${SLACK_PERMALINK_ATTRIBUTES.map((attr) => `[${attr}]`).join(', ')}`;
 const SLACK_ACTIVITY_CONTAINER_SELECTOR = [
@@ -28,6 +31,15 @@ const SLACK_ACTIVITY_CONTAINER_SELECTOR = [
 ].join(', ');
 const SLACK_ACTIVITY_PERMALINK_SELECTOR = [
   'a[data-qa*="permalink" i][href]',
+  'a[data-qa*="message" i][href*="/archives/"]',
+  'a[data-qa*="thread" i][href*="/archives/"]',
+  'a[data-qa*="channel" i][href*="/archives/"]',
+  'a[data-qa*="message" i][href*="/client/"]',
+  'a[data-qa*="thread" i][href*="/client/"]',
+  'a[data-qa*="channel" i][href*="/client/"]',
+  'a[aria-label*="message" i][href]',
+  'a[aria-label*="thread" i][href]',
+  'a[aria-label*="channel" i][href]',
   'a[aria-label*="permalink" i][href]',
   'a[aria-label*="jump" i][href]',
   'a[aria-label*="open" i][href]',
@@ -122,11 +134,11 @@ function getSlackUrlFromElement(element) {
 
   for (const candidate of candidateElements) {
     const href = candidate.href || candidate.getAttribute?.('href');
-    if (href && isSlackNavigableMessageUrl(href)) return new URL(href, window.location.href).href;
+    if (href && !isSlackActivityScreenUrl(href) && isSlackNavigableMessageUrl(href)) return new URL(href, window.location.href).href;
 
     for (const attr of SLACK_PERMALINK_ATTRIBUTES) {
       const value = candidate.getAttribute?.(attr);
-      if (value && isSlackNavigableMessageUrl(value)) return new URL(value, window.location.href).href;
+      if (value && !isSlackActivityScreenUrl(value) && isSlackNavigableMessageUrl(value)) return new URL(value, window.location.href).href;
     }
   }
 
@@ -141,16 +153,38 @@ function findSlackChannelContainer(element) {
   return element?.closest?.('[data-qa=\"message_container\"], [data-qa=\"virtual-list-item\"], [data-ts], [data-message-ts], [data-channel-id], [role=\"listitem\"]') || null;
 }
 
+function isSlackActivityScreenUrl(url) {
+  try {
+    const parsed = new URL(url, window.location.href);
+    return isSlackWebPage(parsed.href) && /\/activity(?:$|[/?#])/i.test(parsed.pathname);
+  } catch (error) {
+    return false;
+  }
+}
+
 function getSlackCandidateUrl(candidate) {
   const href = candidate?.href || candidate?.getAttribute?.('href');
-  if (href && isSlackNavigableMessageUrl(href)) return new URL(href, window.location.href).href;
+  if (href && !isSlackActivityScreenUrl(href) && isSlackNavigableMessageUrl(href)) return new URL(href, window.location.href).href;
 
   for (const attr of SLACK_PERMALINK_ATTRIBUTES) {
     const value = candidate?.getAttribute?.(attr);
-    if (value && isSlackNavigableMessageUrl(value)) return new URL(value, window.location.href).href;
+    if (value && !isSlackActivityScreenUrl(value) && isSlackNavigableMessageUrl(value)) return new URL(value, window.location.href).href;
   }
 
   return null;
+}
+
+function getSlackCandidateScore(candidate) {
+  const descriptor = [
+    candidate?.getAttribute?.('data-qa'),
+    candidate?.getAttribute?.('aria-label'),
+    candidate?.getAttribute?.('title'),
+    candidate?.className,
+  ].join(' ').toLowerCase();
+
+  if (/thread/.test(descriptor)) return 0;
+  if (/message|permalink|jump|open|channel/.test(descriptor)) return 1;
+  return 2;
 }
 
 function findSlackActivityTargetUrlFromElement(element) {
@@ -160,7 +194,10 @@ function findSlackActivityTargetUrlFromElement(element) {
   const activityPermalinkCandidates = [
     activityContainer.closest?.(SLACK_ACTIVITY_PERMALINK_SELECTOR),
     ...Array.from(activityContainer.querySelectorAll?.(SLACK_ACTIVITY_PERMALINK_SELECTOR) || []),
-  ].filter(Boolean);
+  ]
+    .filter(Boolean)
+    .filter((candidate, index, candidates) => candidates.indexOf(candidate) === index)
+    .sort((left, right) => getSlackCandidateScore(left) - getSlackCandidateScore(right));
 
   for (const candidate of activityPermalinkCandidates) {
     const activityPermalink = getSlackCandidateUrl(candidate);
