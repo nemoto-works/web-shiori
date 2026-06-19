@@ -1,4 +1,6 @@
 let latestInteractionPosition = null;
+let contentAwareRefreshTimer = null;
+let isRenderingStickyNotes = false;
 
 function getDialogPositionFromPoint(clientX, clientY) {
   const margin = 16;
@@ -122,6 +124,25 @@ function getClampedNotePosition(position, el) {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+function normalizeMatchText(text) {
+  return (text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function getNoteSelectedText(note) {
+  return note?.anchor?.selectedText || note?.anchor?.selectionText || note?.selectionText || '';
+}
+
+function getCurrentPageMatchText() {
+  return normalizeMatchText(document.body?.innerText || document.body?.textContent || '');
+}
+
+function noteMatchesCurrentPageContent(note, pageMatchText = getCurrentPageMatchText()) {
+  const selectedText = normalizeMatchText(getNoteSelectedText(note));
+  if (!selectedText) return true;
+
+  return pageMatchText.includes(selectedText);
 }
 
 function makeStickyNoteDraggable(el, note, initialPosition, onClickWithoutDrag) {
@@ -319,16 +340,50 @@ function restoreScrollPosition(notes) {
 }
 
 async function renderStickyNotes({ restoreScroll = true } = {}) {
-  document.querySelectorAll('.web-shiori-note').forEach((noteEl) => noteEl.remove());
+  isRenderingStickyNotes = true;
+  try {
+    document.querySelectorAll('.web-shiori-note').forEach((noteEl) => noteEl.remove());
 
-  const storage = window.webShioriStorage;
-  if (!storage?.getNotesForUrl) return;
+    const storage = window.webShioriStorage;
+    if (!storage?.getNotesForUrl) return;
 
-  const notes = await storage.getNotesForUrl(window.location.href);
-  const activeNotes = (notes || []).filter((note) => !note.completed);
-  if (restoreScroll) restoreScrollPosition(activeNotes);
-  activeNotes.forEach((note, index) => {
-    document.body.appendChild(createStickyNote(note, index));
+    const notes = await storage.getNotesForUrl(window.location.href);
+    const pageMatchText = getCurrentPageMatchText();
+    const activeNotes = (notes || []).filter((note) => !note.completed && noteMatchesCurrentPageContent(note, pageMatchText));
+    if (restoreScroll) restoreScrollPosition(activeNotes);
+    activeNotes.forEach((note, index) => {
+      document.body.appendChild(createStickyNote(note, index));
+    });
+  } finally {
+    isRenderingStickyNotes = false;
+  }
+}
+
+function scheduleContentAwareRefresh() {
+  if (isRenderingStickyNotes) return;
+
+  clearTimeout(contentAwareRefreshTimer);
+  contentAwareRefreshTimer = window.setTimeout(() => {
+    renderStickyNotes({ restoreScroll: false }).catch(() => {
+      // Keep page mutations safe even if extension storage is unavailable.
+    });
+  }, 250);
+}
+
+function startContentAwareRefreshObserver() {
+  if (!document.body || typeof MutationObserver === 'undefined') return;
+
+  const observer = new MutationObserver((mutations) => {
+    if (isRenderingStickyNotes) return;
+    if (mutations.every((mutation) => mutation.target?.closest?.('.web-shiori-note, #web-shiori-quick-entry'))) return;
+
+    scheduleContentAwareRefresh();
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    characterData: true,
+    subtree: true,
   });
 }
 
@@ -485,6 +540,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 (async () => {
   try {
     await renderStickyNotes();
+    startContentAwareRefreshObserver();
   } catch (error) {
     // Keep the page safe even if extension storage is unavailable.
   }
