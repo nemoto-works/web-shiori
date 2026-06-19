@@ -62,35 +62,16 @@ function isSlackNavigableMessageUrl(url) {
     if (!isSlackWebPage(parsed.href)) return false;
 
     const path = parsed.pathname;
-    return /\/archives\/[A-Z0-9]+\/p\d{10,}/i.test(path)
-      || /\/archives\/[A-Z0-9]+\/thread\//i.test(path)
-      || /[?&](thread_ts|cid|channel|message_ts)=/i.test(parsed.search);
+    const isWorkspaceArchivePermalink = parsed.hostname !== 'app.slack.com'
+      && parsed.hostname.endsWith('.slack.com')
+      && /\/archives\/[A-Z0-9]+\/p\d{10,}(?:$|[/?#])/i.test(path);
+    const isAppClientMessageLink = parsed.hostname === 'app.slack.com'
+      && /\/client\/[A-Z0-9]+\/[A-Z0-9]+(?:\/thread\/[A-Z0-9]+-\d{10,})?(?:$|[/?#])/i.test(path);
+
+    return isWorkspaceArchivePermalink || isAppClientMessageLink;
   } catch (error) {
     return false;
   }
-}
-
-function getSlackCurrentWorkspaceMessageUrl(channel, timestamp) {
-  if (!channel || !timestamp || !/^\d+(?:\.\d+)?$/.test(timestamp)) return null;
-
-  const timestampId = timestamp.replace('.', '').padEnd(16, '0');
-  try {
-    const currentUrl = new URL(window.location.href);
-    if (!isSlackWebPage(currentUrl.href)) return null;
-
-    const clientWorkspace = currentUrl.pathname.match(/^\/client\/([^/]+)\//i)?.[1];
-    if (currentUrl.hostname === 'app.slack.com' && clientWorkspace) {
-      return new URL(`/client/${clientWorkspace}/${channel}/thread/${channel}-${timestampId}`, currentUrl.origin).href;
-    }
-
-    if (currentUrl.hostname !== 'app.slack.com' && currentUrl.hostname.endsWith('.slack.com')) {
-      return new URL(`/archives/${channel}/p${timestampId}`, currentUrl.origin).href;
-    }
-  } catch (error) {
-    return null;
-  }
-
-  return null;
 }
 
 function getSlackUrlFromElement(element) {
@@ -105,16 +86,7 @@ function getSlackUrlFromElement(element) {
     if (value && isSlackNavigableMessageUrl(value)) return new URL(value, window.location.href).href;
   }
 
-  const timestamp = element.getAttribute?.('data-ts')
-    || element.getAttribute?.('data-message-ts')
-    || element.closest?.('[data-ts], [data-message-ts]')?.getAttribute?.('data-ts')
-    || element.closest?.('[data-ts], [data-message-ts]')?.getAttribute?.('data-message-ts');
-  const channel = element.getAttribute?.('data-channel-id')
-    || element.closest?.('[data-channel-id]')?.getAttribute?.('data-channel-id')
-    || window.location.pathname.match(/\/archives\/([A-Z0-9]+)/i)?.[1]
-    || window.location.pathname.match(/^\/client\/[^/]+\/([A-Z0-9]+)/i)?.[1];
-
-  return getSlackCurrentWorkspaceMessageUrl(channel, timestamp);
+  return null;
 }
 
 function findSlackTargetUrlFromSelection() {
