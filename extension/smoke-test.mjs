@@ -6,7 +6,7 @@ const extensionDir = new URL('.', import.meta.url).pathname;
 const manifest = JSON.parse(readFileSync(join(extensionDir, 'manifest.json'), 'utf8'));
 
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, '0.1.9');
+assert.equal(manifest.version, '0.1.10');
 assert.equal(manifest.action.default_popup, 'popup.html');
 assert.ok(manifest.permissions.includes('storage'));
 assert.ok(manifest.permissions.includes('tabs'));
@@ -21,6 +21,15 @@ for (const file of ['popup.html', 'popup.js', 'storage.js', 'contentScript.js', 
 
 const storageJs = readFileSync(join(extensionDir, 'storage.js'), 'utf8');
 assert.match(storageJs, /getNotesForUrl/);
+assert.match(storageJs, /getNoteUrlCandidates/);
+assert.match(storageJs, /noteMatchesUrl/);
+assert.match(storageJs, /note\?\.targetUrl/);
+assert.match(storageJs, /note\?\.anchorUrl/);
+assert.match(storageJs, /note\?\.anchor\?\.targetUrl/);
+assert.match(storageJs, /note\?\.anchor\?\.anchorUrl/);
+assert.match(storageJs, /getNoteUrlCandidates\(note\)\.some/);
+assert.match(storageJs, /normalizeUrl\(candidateUrl\) === normalizedUrl/);
+assert.match(storageJs, /notes\.filter\(\(note\) => noteMatchesUrl\(note, url\)\)/);
 assert.match(storageJs, /updateNote/);
 
 const contentScriptJs = readFileSync(join(extensionDir, 'contentScript.js'), 'utf8');

@@ -24,9 +24,23 @@ function setAllNotes(notes) {
   });
 }
 
-function getNotesForUrl(url) {
+function getNoteUrlCandidates(note) {
+  return [
+    note?.url,
+    note?.targetUrl,
+    note?.anchorUrl,
+    note?.anchor?.targetUrl,
+    note?.anchor?.anchorUrl,
+  ].filter(Boolean);
+}
+
+function noteMatchesUrl(note, url) {
   const normalizedUrl = normalizeUrl(url);
-  return getAllNotes().then((notes) => notes.filter((note) => normalizeUrl(note.url) === normalizedUrl));
+  return getNoteUrlCandidates(note).some((candidateUrl) => normalizeUrl(candidateUrl) === normalizedUrl);
+}
+
+function getNotesForUrl(url) {
+  return getAllNotes().then((notes) => notes.filter((note) => noteMatchesUrl(note, url)));
 }
 
 function addNote(note) {
@@ -64,6 +78,8 @@ window.webShioriStorage = {
   normalizeUrl,
   getAllNotes,
   getNotesForUrl,
+  getNoteUrlCandidates,
+  noteMatchesUrl,
   setAllNotes,
   addNote,
   updateNote,
