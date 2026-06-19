@@ -46,6 +46,87 @@ function getQuickEntryFallbackPosition() {
 document.addEventListener('pointerdown', rememberInteractionPosition, { capture: true, passive: true });
 document.addEventListener('click', rememberInteractionPosition, { capture: true, passive: true });
 
+
+function isSlackWebPage(url = window.location.href) {
+  try {
+    const { hostname } = new URL(url);
+    return hostname === 'app.slack.com' || hostname.endsWith('.slack.com');
+  } catch (error) {
+    return false;
+  }
+}
+
+function isSlackNavigableMessageUrl(url) {
+  try {
+    const parsed = new URL(url, window.location.href);
+    if (!isSlackWebPage(parsed.href)) return false;
+
+    const path = parsed.pathname;
+    return /\/archives\/[A-Z0-9]+\/p\d{10,}/i.test(path)
+      || /\/archives\/[A-Z0-9]+\/thread\//i.test(path)
+      || /[?&](thread_ts|cid|channel|message_ts)=/i.test(parsed.search);
+  } catch (error) {
+    return false;
+  }
+}
+
+function getSlackUrlFromElement(element) {
+  if (!element?.closest) return null;
+
+  const link = element.closest('a[href]') || element.querySelector?.('a[href*="/archives/"]');
+  if (link?.href && isSlackNavigableMessageUrl(link.href)) return link.href;
+
+  const candidateAttributes = ['data-qa-permalink', 'data-message-permalink', 'data-permalink', 'href'];
+  for (const attr of candidateAttributes) {
+    const value = element.getAttribute?.(attr);
+    if (value && isSlackNavigableMessageUrl(value)) return new URL(value, window.location.href).href;
+  }
+
+  const timestamp = element.getAttribute?.('data-ts')
+    || element.getAttribute?.('data-message-ts')
+    || element.closest?.('[data-ts], [data-message-ts]')?.getAttribute?.('data-ts')
+    || element.closest?.('[data-ts], [data-message-ts]')?.getAttribute?.('data-message-ts');
+  const channel = element.getAttribute?.('data-channel-id')
+    || element.closest?.('[data-channel-id]')?.getAttribute?.('data-channel-id')
+    || window.location.pathname.match(/\/archives\/([A-Z0-9]+)/i)?.[1];
+
+  if (channel && timestamp && /^\d+(?:\.\d+)?$/.test(timestamp)) {
+    return new URL(`/archives/${channel}/p${timestamp.replace('.', '').padEnd(16, '0')}`, window.location.origin).href;
+  }
+
+  return null;
+}
+
+function findSlackTargetUrlFromSelection() {
+  if (!isSlackWebPage()) return null;
+
+  const selection = window.getSelection?.();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+
+  const range = selection.getRangeAt(0);
+  const start = range.startContainer?.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer?.parentElement;
+  const end = range.endContainer?.nodeType === Node.ELEMENT_NODE ? range.endContainer : range.endContainer?.parentElement;
+  const common = range.commonAncestorContainer?.nodeType === Node.ELEMENT_NODE
+    ? range.commonAncestorContainer
+    : range.commonAncestorContainer?.parentElement;
+
+  const candidates = [start, end, common]
+    .filter(Boolean)
+    .flatMap((element) => [
+      element,
+      element.closest?.('[data-qa="message_container"], [data-qa="virtual-list-item"], [data-ts], [data-message-ts], [data-channel-id]'),
+      element.closest?.('a[href]'),
+    ])
+    .filter(Boolean);
+
+  for (const candidate of candidates) {
+    const targetUrl = getSlackUrlFromElement(candidate);
+    if (targetUrl) return targetUrl;
+  }
+
+  return null;
+}
+
 function getSelectionPosition() {
   const selection = window.getSelection?.();
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
@@ -66,6 +147,7 @@ function getSelectionPosition() {
     viewportHeight: window.innerHeight,
     selectedText: selection.toString().slice(0, 120),
     selectionText: selection.toString().slice(0, 120),
+    targetUrl: findSlackTargetUrlFromSelection() || undefined,
     selectionRect: {
       left: rect.left,
       top: rect.top,
@@ -406,6 +488,7 @@ async function saveQuickEntryNote(noteText, initialPosition = null) {
         scrollY: position.scrollY,
         viewportWidth: position.viewportWidth,
         viewportHeight: position.viewportHeight,
+        targetUrl: position.targetUrl,
       }
     : undefined;
 
@@ -416,6 +499,7 @@ async function saveQuickEntryNote(noteText, initialPosition = null) {
     x: position.x,
     y: position.y,
     position,
+    ...(position.targetUrl ? { targetUrl: position.targetUrl } : {}),
     ...(anchor ? { anchor } : {}),
     completed: false,
   });

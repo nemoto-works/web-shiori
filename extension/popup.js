@@ -60,6 +60,7 @@ function getAnchorFromPosition(position) {
     scrollY: position.scrollY,
     viewportWidth: position.viewportWidth,
     viewportHeight: position.viewportHeight,
+    targetUrl: position.targetUrl,
   };
 }
 
@@ -82,19 +83,26 @@ async function refreshTabsForUrl(url) {
   await Promise.all(tabs.map((tab) => sendRefreshMessage(tab)));
 }
 
-async function openOrFocusNoteUrl(note) {
-  if (!note?.url) return;
+function getNoteNavigationUrl(note) {
+  return note?.targetUrl || note?.anchorUrl || note?.url || '';
+}
 
-  const [matchingTab] = await getMatchingTabs(note.url);
-  if (matchingTab?.id) {
-    await chrome.tabs.update(matchingTab.id, { active: true });
-    if (matchingTab.windowId !== undefined) {
-      await chrome.windows.update(matchingTab.windowId, { focused: true });
+async function openOrFocusNoteUrl(note) {
+  const navigationUrl = getNoteNavigationUrl(note);
+  if (!navigationUrl) return;
+
+  const [matchingTab] = await getMatchingTabs(navigationUrl);
+  const [fallbackTab] = matchingTab ? [] : await getMatchingTabs(note.url);
+  const targetTab = matchingTab || fallbackTab;
+  if (targetTab?.id) {
+    await chrome.tabs.update(targetTab.id, { active: true, url: navigationUrl });
+    if (targetTab.windowId !== undefined) {
+      await chrome.windows.update(targetTab.windowId, { focused: true });
     }
     return;
   }
 
-  await chrome.tabs.create({ url: note.url });
+  await chrome.tabs.create({ url: navigationUrl });
 }
 
 function renderVersion() {
@@ -214,6 +222,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       x: pageContext.position.x,
       y: pageContext.position.y,
       position: pageContext.position,
+      ...(pageContext.position.targetUrl ? { targetUrl: pageContext.position.targetUrl } : {}),
       ...(anchor ? { anchor } : {}),
       completed: false,
     });
