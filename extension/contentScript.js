@@ -1,6 +1,10 @@
 let latestInteractionPosition = null;
 let contentAwareRefreshTimer = null;
 let isRenderingStickyNotes = false;
+let lastStickyRenderSignature = '';
+let lastContentAwareRefreshAt = 0;
+const CONTENT_AWARE_REFRESH_DEBOUNCE_MS = 350;
+const CONTENT_AWARE_REFRESH_THROTTLE_MS = 1000;
 
 function getDialogPositionFromPoint(clientX, clientY) {
   const margin = 16;
@@ -97,6 +101,28 @@ function getSlackUrlFromElement(element) {
   return null;
 }
 
+function findSlackActivityContainer(element) {
+  return element?.closest?.('[data-qa=\"activity_feed_item\"], [data-qa=\"activity-item\"], [data-qa=\"activity_page_item\"], [aria-label*=\"Activity\" i], [class*=\"activity\" i]') || null;
+}
+
+function findSlackChannelContainer(element) {
+  return element?.closest?.('[data-qa=\"message_container\"], [data-qa=\"virtual-list-item\"], [data-ts], [data-message-ts], [data-channel-id], [role=\"listitem\"]') || null;
+}
+
+function findSlackActivityTargetUrlFromElement(element) {
+  const activityContainer = findSlackActivityContainer(element);
+  if (!activityContainer) return null;
+
+  const directUrl = getSlackUrlFromElement(activityContainer);
+  if (directUrl) return directUrl;
+
+  const navigableLink = Array.from(activityContainer.querySelectorAll?.('a[href]') || [])
+    .map((link) => link.href || link.getAttribute('href'))
+    .find((href) => href && isSlackNavigableMessageUrl(href));
+
+  return navigableLink ? new URL(navigableLink, window.location.href).href : null;
+}
+
 function findSlackTargetUrlFromSelection() {
   if (!isSlackWebPage()) return null;
 
@@ -114,11 +140,17 @@ function findSlackTargetUrlFromSelection() {
     .filter(Boolean)
     .flatMap((element) => [
       element,
-      element.closest?.('[data-qa="message_container"], [data-qa="virtual-list-item"], [data-ts], [data-message-ts], [data-channel-id], [role="listitem"]'),
+      findSlackActivityContainer(element),
+      findSlackChannelContainer(element),
       element.closest?.('[data-qa-permalink], [data-message-permalink], [data-permalink], [data-thread-permalink]'),
       element.closest?.('a[href]'),
     ])
     .filter(Boolean);
+
+  for (const candidate of candidates) {
+    const activityTargetUrl = findSlackActivityTargetUrlFromElement(candidate);
+    if (activityTargetUrl) return activityTargetUrl;
+  }
 
   for (const candidate of candidates) {
     const targetUrl = getSlackUrlFromElement(candidate);
@@ -179,6 +211,10 @@ function getStickyPosition(index) {
     viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
   };
+}
+
+function getNoteRenderKey(note, index) {
+  return note.id || `${note.url || 'note'}:${note.createdAt || ''}:${index}`;
 }
 
 function getNotePosition(note, index) {
@@ -402,9 +438,10 @@ function openStickyNoteEditor(el, note) {
   saveButton.type = 'button';
   saveButton.textContent = 'Save';
 
-  const closeEditor = (text) => {
-    el.textContent = text;
-    el.style.cursor = 'grab';
+  const closeEditor = () => {
+    renderStickyNotes({ restoreScroll: false, force: true }).catch(() => {
+      el.style.cursor = 'grab';
+    });
   };
 
   const save = async () => {
@@ -415,17 +452,18 @@ function openStickyNoteEditor(el, note) {
     saveButton.disabled = true;
     await storage.updateNote(note.id, { text });
     note.text = text;
-    closeEditor(text);
+    closeEditor();
   };
 
   textarea.addEventListener('pointerdown', (event) => event.stopPropagation());
   textarea.addEventListener('click', (event) => event.stopPropagation());
   actions.addEventListener('pointerdown', (event) => event.stopPropagation());
-  cancelButton.addEventListener('click', () => closeEditor(originalText));
+  cancelButton.addEventListener('click', () => { note.text = originalText; closeEditor(); });
   saveButton.addEventListener('click', save);
   textarea.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
-      closeEditor(originalText);
+      note.text = originalText;
+      closeEditor();
       event.preventDefault();
     }
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
@@ -441,10 +479,41 @@ function openStickyNoteEditor(el, note) {
 }
 
 function createStickyNote(note, index) {
+  const storage = window.webShioriStorage;
   const position = getNotePosition(note, index);
   const el = document.createElement('div');
   el.className = 'web-shiori-note';
-  el.textContent = note.text;
+  el.dataset.noteId = getNoteRenderKey(note, index);
+
+  const noteText = document.createElement('div');
+  noteText.className = 'web-shiori-note-text';
+  noteText.textContent = note.text;
+
+  const controls = document.createElement('div');
+  controls.className = 'web-shiori-note-controls';
+  controls.style.display = 'flex';
+  controls.style.justifyContent = 'flex-end';
+  controls.style.gap = '6px';
+  controls.style.marginTop = '6px';
+
+  const editButton = document.createElement('button');
+  editButton.type = 'button';
+  editButton.textContent = 'Edit';
+  editButton.className = 'web-shiori-note-edit';
+  const completeButton = document.createElement('button');
+  completeButton.type = 'button';
+  completeButton.textContent = 'Done';
+  completeButton.className = 'web-shiori-note-complete';
+  controls.addEventListener('pointerdown', (event) => event.stopPropagation());
+  editButton.addEventListener('click', (event) => { event.stopPropagation(); openStickyNoteEditor(el, note); });
+  completeButton.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    if (!storage?.updateNote || !note.id) return;
+    await storage.updateNote(note.id, { completed: true });
+    await renderStickyNotes({ restoreScroll: false, force: true });
+  });
+  controls.append(editButton, completeButton);
+  el.append(noteText, controls);
 
   el.style.position = 'fixed';
   el.style.zIndex = '2147483646';
@@ -459,6 +528,7 @@ function createStickyNote(note, index) {
   el.style.lineHeight = '1.4';
   el.style.color = '#222';
   el.style.whiteSpace = 'pre-wrap';
+  el.style.userSelect = 'none';
 
   const clampedPosition = getClampedNotePosition(position, el);
   el.style.top = `${clampedPosition.y}px`;
@@ -483,11 +553,22 @@ function restoreScrollPosition(notes) {
   });
 }
 
-async function renderStickyNotes({ restoreScroll = true } = {}) {
+function getRenderableNotesSignature(renderableNotes) {
+  return JSON.stringify(renderableNotes.map(({ note }, index) => {
+    const position = getNotePosition(note, index);
+    return {
+      id: getNoteRenderKey(note, index),
+      text: note.text || '',
+      completed: !!note.completed,
+      x: Number.isFinite(position.x) ? Math.round(position.x) : null,
+      y: Number.isFinite(position.y) ? Math.round(position.y) : null,
+    };
+  }));
+}
+
+async function renderStickyNotes({ restoreScroll = true, force = false } = {}) {
   isRenderingStickyNotes = true;
   try {
-    document.querySelectorAll('.web-shiori-note').forEach((noteEl) => noteEl.remove());
-
     const storage = window.webShioriStorage;
     if (!storage?.getNotesForUrl) return;
 
@@ -497,6 +578,12 @@ async function renderStickyNotes({ restoreScroll = true } = {}) {
     const renderableNotes = activeNotes
       .map((note, index) => resolveRenderableNote(note, index, { restoreScroll }))
       .filter(Boolean);
+    const renderSignature = getRenderableNotesSignature(renderableNotes);
+    if (!force && !restoreScroll && renderSignature === lastStickyRenderSignature) return;
+
+    document.querySelectorAll('.web-shiori-note').forEach((noteEl) => noteEl.remove());
+    lastStickyRenderSignature = renderSignature;
+
     if (restoreScroll && renderableNotes.every(({ anchorElement }) => !anchorElement)) restoreScrollPosition(activeNotes);
     renderableNotes.forEach(({ note }, index) => {
       document.body.appendChild(createStickyNote(note, index));
@@ -510,11 +597,14 @@ function scheduleContentAwareRefresh() {
   if (isRenderingStickyNotes) return;
 
   clearTimeout(contentAwareRefreshTimer);
+  const now = Date.now();
+  const throttleDelay = Math.max(0, CONTENT_AWARE_REFRESH_THROTTLE_MS - (now - lastContentAwareRefreshAt));
   contentAwareRefreshTimer = window.setTimeout(() => {
+    lastContentAwareRefreshAt = Date.now();
     renderStickyNotes({ restoreScroll: false }).catch(() => {
       // Keep page mutations safe even if extension storage is unavailable.
     });
-  }, 250);
+  }, Math.max(CONTENT_AWARE_REFRESH_DEBOUNCE_MS, throttleDelay));
 }
 
 function startContentAwareRefreshObserver() {
