@@ -77,13 +77,21 @@ function isSlackNavigableMessageUrl(url) {
 function getSlackUrlFromElement(element) {
   if (!element?.closest) return null;
 
-  const link = element.closest('a[href]') || element.querySelector?.('a[href*="/archives/"], a[href*="/client/"]');
-  if (link?.href && isSlackNavigableMessageUrl(link.href)) return link.href;
+  const candidateAttributes = ['data-qa-permalink', 'data-message-permalink', 'data-permalink', 'data-thread-permalink', 'href'];
+  const candidateElements = [
+    element.closest('a[href]'),
+    element,
+    ...(element.querySelectorAll?.('a[href], [data-qa-permalink], [data-message-permalink], [data-permalink], [data-thread-permalink]') || []),
+  ].filter(Boolean);
 
-  const candidateAttributes = ['data-qa-permalink', 'data-message-permalink', 'data-permalink', 'href'];
-  for (const attr of candidateAttributes) {
-    const value = element.getAttribute?.(attr);
-    if (value && isSlackNavigableMessageUrl(value)) return new URL(value, window.location.href).href;
+  for (const candidate of candidateElements) {
+    const href = candidate.href || candidate.getAttribute?.('href');
+    if (href && isSlackNavigableMessageUrl(href)) return new URL(href, window.location.href).href;
+
+    for (const attr of candidateAttributes) {
+      const value = candidate.getAttribute?.(attr);
+      if (value && isSlackNavigableMessageUrl(value)) return new URL(value, window.location.href).href;
+    }
   }
 
   return null;
@@ -106,7 +114,8 @@ function findSlackTargetUrlFromSelection() {
     .filter(Boolean)
     .flatMap((element) => [
       element,
-      element.closest?.('[data-qa="message_container"], [data-qa="virtual-list-item"], [data-ts], [data-message-ts], [data-channel-id]'),
+      element.closest?.('[data-qa="message_container"], [data-qa="virtual-list-item"], [data-ts], [data-message-ts], [data-channel-id], [role="listitem"]'),
+      element.closest?.('[data-qa-permalink], [data-message-permalink], [data-permalink], [data-thread-permalink]'),
       element.closest?.('a[href]'),
     ])
     .filter(Boolean);
@@ -126,6 +135,7 @@ function getSelectionPosition() {
   const rect = selection.getRangeAt(0).getBoundingClientRect();
   if (rect.width === 0 && rect.height === 0) return null;
 
+  const slackTargetUrl = findSlackTargetUrlFromSelection() || undefined;
   const margin = 16;
   const x = Math.min(Math.max(rect.left, margin), Math.max(window.innerWidth - 280, margin));
   const y = Math.min(Math.max(rect.bottom + 8, margin), Math.max(window.innerHeight - 120, margin));
@@ -139,7 +149,8 @@ function getSelectionPosition() {
     viewportHeight: window.innerHeight,
     selectedText: selection.toString().slice(0, 120),
     selectionText: selection.toString().slice(0, 120),
-    targetUrl: findSlackTargetUrlFromSelection() || undefined,
+    targetUrl: slackTargetUrl,
+    anchorUrl: slackTargetUrl,
     selectionRect: {
       left: rect.left,
       top: rect.top,
@@ -272,12 +283,8 @@ function resolveRenderableNote(note, index, { restoreScroll = true } = {}) {
     anchorElement.scrollIntoView?.({ block: 'center', inline: 'nearest', behavior: 'instant' });
   }
 
-  const fallbackPosition = getNotePosition(note, index);
   return {
-    note: {
-      ...note,
-      position: getPositionNearElement(anchorElement, fallbackPosition),
-    },
+    note,
     anchorElement,
   };
 }
@@ -547,6 +554,7 @@ async function saveQuickEntryNote(noteText, initialPosition = null) {
         viewportWidth: position.viewportWidth,
         viewportHeight: position.viewportHeight,
         targetUrl: position.targetUrl,
+        anchorUrl: position.anchorUrl,
       }
     : undefined;
 
@@ -558,6 +566,7 @@ async function saveQuickEntryNote(noteText, initialPosition = null) {
     y: position.y,
     position,
     ...(position.targetUrl ? { targetUrl: position.targetUrl } : {}),
+    ...(position.anchorUrl ? { anchorUrl: position.anchorUrl } : {}),
     ...(anchor ? { anchor } : {}),
     completed: false,
   });

@@ -61,6 +61,7 @@ function getAnchorFromPosition(position) {
     viewportWidth: position.viewportWidth,
     viewportHeight: position.viewportHeight,
     targetUrl: position.targetUrl,
+    anchorUrl: position.anchorUrl,
   };
 }
 
@@ -84,7 +85,7 @@ async function refreshTabsForUrl(url) {
 }
 
 function getNoteNavigationUrl(note) {
-  return note?.targetUrl || note?.anchorUrl || note?.url || '';
+  return note?.targetUrl || note?.anchorUrl || note?.anchor?.targetUrl || note?.anchor?.anchorUrl || note?.url || '';
 }
 
 async function openOrFocusNoteUrl(note) {
@@ -223,6 +224,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       y: pageContext.position.y,
       position: pageContext.position,
       ...(pageContext.position.targetUrl ? { targetUrl: pageContext.position.targetUrl } : {}),
+      ...(pageContext.position.anchorUrl ? { anchorUrl: pageContext.position.anchorUrl } : {}),
       ...(anchor ? { anchor } : {}),
       completed: false,
     });
