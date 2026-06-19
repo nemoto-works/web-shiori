@@ -1,6 +1,76 @@
 let latestInteractionPosition = null;
 let contentAwareRefreshTimer = null;
 let isRenderingStickyNotes = false;
+let lastStickyRenderSignature = '';
+let lastContentAwareRefreshAt = 0;
+const CONTENT_AWARE_REFRESH_DEBOUNCE_MS = 350;
+const CONTENT_AWARE_REFRESH_THROTTLE_MS = 1000;
+
+const SLACK_ORIGINAL_MESSAGE_PERMALINK_ATTRIBUTES = [
+  'data-original-message-permalink',
+  'data-original-thread-permalink',
+  'data-channel-message-permalink',
+  'data-message-permalink',
+  'data-thread-permalink',
+  'data-qa-message_permalink',
+];
+const SLACK_GENERIC_PERMALINK_ATTRIBUTES = [
+  'data-qa-permalink',
+  'data-permalink',
+  'data-item-permalink',
+];
+const SLACK_ACTIVITY_SOURCE_PERMALINK_ATTRIBUTES = [
+  'data-activity-permalink',
+];
+const SLACK_PERMALINK_ATTRIBUTES = [
+  ...SLACK_ORIGINAL_MESSAGE_PERMALINK_ATTRIBUTES,
+  ...SLACK_GENERIC_PERMALINK_ATTRIBUTES,
+  ...SLACK_ACTIVITY_SOURCE_PERMALINK_ATTRIBUTES,
+];
+const SLACK_PERMALINK_SELECTOR = `a[href], ${SLACK_PERMALINK_ATTRIBUTES.map((attr) => `[${attr}]`).join(', ')}`;
+const SLACK_ACTIVITY_CONTAINER_SELECTOR = [
+  '[data-qa="activity_feed_item"]',
+  '[data-qa="activity-item"]',
+  '[data-qa="activity_page_item"]',
+  '[data-qa="activity_page_list_item"]',
+  '[data-qa="activity_feed_item_message"]',
+  '[role="listitem"][data-item-key*="activity" i]',
+  '[aria-label*="Activity" i]',
+  '[class*="activity" i]',
+].join(', ');
+const SLACK_TIMESTAMP_PERMALINK_SELECTOR = [
+  'a.c-timestamp[href*="/archives/"]',
+  'a[data-qa*="timestamp" i][href*="/archives/"]',
+  'a[aria-label*="timestamp" i][href*="/archives/"]',
+  'a[title*="timestamp" i][href*="/archives/"]',
+  'time a[href*="/archives/"]',
+  'a[href*="/archives/"][href*="thread_ts="]',
+].join(', ');
+
+const SLACK_ACTIVITY_PERMALINK_SELECTOR = [
+  SLACK_TIMESTAMP_PERMALINK_SELECTOR,
+  'a[data-qa*="original" i][href*="/archives/"]',
+  'a[data-qa*="original" i][href*="/client/"]',
+  'a[data-qa*="permalink" i][href]:not([href*="/activity"])',
+  'a[data-qa*="message" i][href*="/archives/"]',
+  'a[data-qa*="thread" i][href*="/archives/"]',
+  'a[data-qa*="channel" i][href*="/archives/"]',
+  'a[data-qa*="message" i][href*="/client/"]',
+  'a[data-qa*="thread" i][href*="/client/"]',
+  'a[data-qa*="channel" i][href*="/client/"]',
+  'a[aria-label*="message" i][href]',
+  'a[aria-label*="thread" i][href]',
+  'a[aria-label*="channel" i][href]',
+  'a[aria-label*="permalink" i][href]',
+  'a[aria-label*="jump" i][href]',
+  'a[aria-label*="open" i][href]',
+  'a[title*="permalink" i][href]',
+  'a[title*="jump" i][href]',
+  'a[title*="open" i][href]',
+  'a[href*="/archives/"]',
+  'a[href*="/client/"]',
+  ...SLACK_PERMALINK_ATTRIBUTES.map((attr) => `[${attr}]`),
+].join(', ');
 
 function getDialogPositionFromPoint(clientX, clientY) {
   const margin = 16;
@@ -77,13 +147,113 @@ function isSlackNavigableMessageUrl(url) {
 function getSlackUrlFromElement(element) {
   if (!element?.closest) return null;
 
-  const link = element.closest('a[href]') || element.querySelector?.('a[href*="/archives/"], a[href*="/client/"]');
-  if (link?.href && isSlackNavigableMessageUrl(link.href)) return link.href;
+  const candidateElements = [
+    element.closest('a[href]'),
+    element,
+    ...(element.querySelectorAll?.(SLACK_PERMALINK_SELECTOR) || []),
+  ].filter(Boolean);
 
-  const candidateAttributes = ['data-qa-permalink', 'data-message-permalink', 'data-permalink', 'href'];
-  for (const attr of candidateAttributes) {
-    const value = element.getAttribute?.(attr);
-    if (value && isSlackNavigableMessageUrl(value)) return new URL(value, window.location.href).href;
+  for (const candidate of candidateElements) {
+    const href = candidate.href || candidate.getAttribute?.('href');
+    if (href && !isSlackActivityScreenUrl(href) && isSlackNavigableMessageUrl(href)) return new URL(href, window.location.href).href;
+
+    for (const attr of SLACK_PERMALINK_ATTRIBUTES) {
+      const value = candidate.getAttribute?.(attr);
+      if (value && !isSlackActivityScreenUrl(value) && isSlackNavigableMessageUrl(value)) return new URL(value, window.location.href).href;
+    }
+  }
+
+  return null;
+}
+
+function findSlackActivityContainer(element) {
+  return element?.closest?.(SLACK_ACTIVITY_CONTAINER_SELECTOR) || null;
+}
+
+function findSlackChannelContainer(element) {
+  return element?.closest?.('[data-qa=\"message_container\"], [data-qa=\"virtual-list-item\"], [data-ts], [data-message-ts], [data-channel-id], [role=\"listitem\"]') || null;
+}
+
+function isSlackActivityScreenUrl(url) {
+  try {
+    const parsed = new URL(url, window.location.href);
+    return isSlackWebPage(parsed.href) && /\/activity(?:$|[/?#])/i.test(parsed.pathname);
+  } catch (error) {
+    return false;
+  }
+}
+
+function getSlackCandidateUrl(candidate, { activitySource = false } = {}) {
+  const href = candidate?.href || candidate?.getAttribute?.('href');
+  if (href && !isSlackActivityScreenUrl(href) && isSlackNavigableMessageUrl(href)) return new URL(href, window.location.href).href;
+
+  const permalinkAttributes = activitySource
+    ? SLACK_ORIGINAL_MESSAGE_PERMALINK_ATTRIBUTES
+    : SLACK_PERMALINK_ATTRIBUTES;
+
+  for (const attr of permalinkAttributes) {
+    const value = candidate?.getAttribute?.(attr);
+    if (value && !isSlackActivityScreenUrl(value) && isSlackNavigableMessageUrl(value)) return new URL(value, window.location.href).href;
+  }
+
+  return null;
+}
+
+function findSlackTimestampPermalinkFromElement(element) {
+  if (!element?.closest) return null;
+
+  const timestampCandidates = [
+    element.closest(SLACK_TIMESTAMP_PERMALINK_SELECTOR),
+    ...(element.querySelectorAll?.(SLACK_TIMESTAMP_PERMALINK_SELECTOR) || []),
+  ].filter(Boolean);
+
+  for (const candidate of timestampCandidates) {
+    const timestampPermalink = getSlackCandidateUrl(candidate);
+    if (timestampPermalink) return timestampPermalink;
+  }
+
+  return null;
+}
+
+function isSlackActivitySourceCandidate(candidate) {
+  return SLACK_ACTIVITY_SOURCE_PERMALINK_ATTRIBUTES.some((attr) => candidate?.hasAttribute?.(attr));
+}
+
+function getSlackCandidateScore(candidate) {
+  const descriptor = [
+    candidate?.getAttribute?.('data-qa'),
+    candidate?.getAttribute?.('aria-label'),
+    candidate?.getAttribute?.('title'),
+    candidate?.className,
+  ].join(' ').toLowerCase();
+
+  if (/timestamp/.test(descriptor) || candidate?.matches?.(SLACK_TIMESTAMP_PERMALINK_SELECTOR)) return 0;
+  if (/original.*thread|thread.*original/.test(descriptor)) return 1;
+  if (/original.*message|message.*original/.test(descriptor)) return 2;
+  if (/thread/.test(descriptor)) return 3;
+  if (/message|permalink|jump|open|channel/.test(descriptor)) return 4;
+  if (isSlackActivitySourceCandidate(candidate)) return 9;
+  return 5;
+}
+
+function findSlackActivityTargetUrlFromElement(element) {
+  const activityContainer = findSlackActivityContainer(element);
+  if (!activityContainer) return null;
+
+  const timestampPermalink = findSlackTimestampPermalinkFromElement(activityContainer);
+  if (timestampPermalink) return timestampPermalink;
+
+  const activityPermalinkCandidates = [
+    activityContainer.closest?.(SLACK_ACTIVITY_PERMALINK_SELECTOR),
+    ...Array.from(activityContainer.querySelectorAll?.(SLACK_ACTIVITY_PERMALINK_SELECTOR) || []),
+  ]
+    .filter(Boolean)
+    .filter((candidate, index, candidates) => candidates.indexOf(candidate) === index)
+    .sort((left, right) => getSlackCandidateScore(left) - getSlackCandidateScore(right));
+
+  for (const candidate of activityPermalinkCandidates) {
+    const activityPermalink = getSlackCandidateUrl(candidate, { activitySource: true });
+    if (activityPermalink) return activityPermalink;
   }
 
   return null;
@@ -102,16 +272,31 @@ function findSlackTargetUrlFromSelection() {
     ? range.commonAncestorContainer
     : range.commonAncestorContainer?.parentElement;
 
-  const candidates = [start, end, common]
-    .filter(Boolean)
+  const selectionElements = [start, end, common].filter(Boolean);
+  const activityCandidates = selectionElements
+    .map((element) => findSlackActivityContainer(element))
+    .filter(Boolean);
+  if (activityCandidates.length > 0) {
+    for (const candidate of activityCandidates) {
+      const activityTargetUrl = findSlackActivityTargetUrlFromElement(candidate);
+      if (activityTargetUrl) return activityTargetUrl;
+    }
+    return null;
+  }
+
+  const candidates = selectionElements
     .flatMap((element) => [
       element,
-      element.closest?.('[data-qa="message_container"], [data-qa="virtual-list-item"], [data-ts], [data-message-ts], [data-channel-id]'),
+      findSlackChannelContainer(element),
+      element.closest?.(SLACK_PERMALINK_SELECTOR),
       element.closest?.('a[href]'),
     ])
     .filter(Boolean);
 
   for (const candidate of candidates) {
+    const timestampPermalink = findSlackTimestampPermalinkFromElement(candidate);
+    if (timestampPermalink) return timestampPermalink;
+
     const targetUrl = getSlackUrlFromElement(candidate);
     if (targetUrl) return targetUrl;
   }
@@ -126,6 +311,7 @@ function getSelectionPosition() {
   const rect = selection.getRangeAt(0).getBoundingClientRect();
   if (rect.width === 0 && rect.height === 0) return null;
 
+  const slackTargetUrl = findSlackTargetUrlFromSelection() || undefined;
   const margin = 16;
   const x = Math.min(Math.max(rect.left, margin), Math.max(window.innerWidth - 280, margin));
   const y = Math.min(Math.max(rect.bottom + 8, margin), Math.max(window.innerHeight - 120, margin));
@@ -139,7 +325,8 @@ function getSelectionPosition() {
     viewportHeight: window.innerHeight,
     selectedText: selection.toString().slice(0, 120),
     selectionText: selection.toString().slice(0, 120),
-    targetUrl: findSlackTargetUrlFromSelection() || undefined,
+    targetUrl: slackTargetUrl,
+    anchorUrl: slackTargetUrl,
     selectionRect: {
       left: rect.left,
       top: rect.top,
@@ -168,6 +355,10 @@ function getStickyPosition(index) {
     viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
   };
+}
+
+function getNoteRenderKey(note, index) {
+  return note.id || `${note.url || 'note'}:${note.createdAt || ''}:${index}`;
 }
 
 function getNotePosition(note, index) {
@@ -272,12 +463,8 @@ function resolveRenderableNote(note, index, { restoreScroll = true } = {}) {
     anchorElement.scrollIntoView?.({ block: 'center', inline: 'nearest', behavior: 'instant' });
   }
 
-  const fallbackPosition = getNotePosition(note, index);
   return {
-    note: {
-      ...note,
-      position: getPositionNearElement(anchorElement, fallbackPosition),
-    },
+    note,
     anchorElement,
   };
 }
@@ -395,9 +582,10 @@ function openStickyNoteEditor(el, note) {
   saveButton.type = 'button';
   saveButton.textContent = 'Save';
 
-  const closeEditor = (text) => {
-    el.textContent = text;
-    el.style.cursor = 'grab';
+  const closeEditor = () => {
+    renderStickyNotes({ restoreScroll: false, force: true }).catch(() => {
+      el.style.cursor = 'grab';
+    });
   };
 
   const save = async () => {
@@ -408,17 +596,18 @@ function openStickyNoteEditor(el, note) {
     saveButton.disabled = true;
     await storage.updateNote(note.id, { text });
     note.text = text;
-    closeEditor(text);
+    closeEditor();
   };
 
   textarea.addEventListener('pointerdown', (event) => event.stopPropagation());
   textarea.addEventListener('click', (event) => event.stopPropagation());
   actions.addEventListener('pointerdown', (event) => event.stopPropagation());
-  cancelButton.addEventListener('click', () => closeEditor(originalText));
+  cancelButton.addEventListener('click', () => { note.text = originalText; closeEditor(); });
   saveButton.addEventListener('click', save);
   textarea.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
-      closeEditor(originalText);
+      note.text = originalText;
+      closeEditor();
       event.preventDefault();
     }
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
@@ -434,10 +623,41 @@ function openStickyNoteEditor(el, note) {
 }
 
 function createStickyNote(note, index) {
+  const storage = window.webShioriStorage;
   const position = getNotePosition(note, index);
   const el = document.createElement('div');
   el.className = 'web-shiori-note';
-  el.textContent = note.text;
+  el.dataset.noteId = getNoteRenderKey(note, index);
+
+  const noteText = document.createElement('div');
+  noteText.className = 'web-shiori-note-text';
+  noteText.textContent = note.text;
+
+  const controls = document.createElement('div');
+  controls.className = 'web-shiori-note-controls';
+  controls.style.display = 'flex';
+  controls.style.justifyContent = 'flex-end';
+  controls.style.gap = '6px';
+  controls.style.marginTop = '6px';
+
+  const editButton = document.createElement('button');
+  editButton.type = 'button';
+  editButton.textContent = 'Edit';
+  editButton.className = 'web-shiori-note-edit';
+  const completeButton = document.createElement('button');
+  completeButton.type = 'button';
+  completeButton.textContent = 'Done';
+  completeButton.className = 'web-shiori-note-complete';
+  controls.addEventListener('pointerdown', (event) => event.stopPropagation());
+  editButton.addEventListener('click', (event) => { event.stopPropagation(); openStickyNoteEditor(el, note); });
+  completeButton.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    if (!storage?.updateNote || !note.id) return;
+    await storage.updateNote(note.id, { completed: true });
+    await renderStickyNotes({ restoreScroll: false, force: true });
+  });
+  controls.append(editButton, completeButton);
+  el.append(noteText, controls);
 
   el.style.position = 'fixed';
   el.style.zIndex = '2147483646';
@@ -452,6 +672,7 @@ function createStickyNote(note, index) {
   el.style.lineHeight = '1.4';
   el.style.color = '#222';
   el.style.whiteSpace = 'pre-wrap';
+  el.style.userSelect = 'none';
 
   const clampedPosition = getClampedNotePosition(position, el);
   el.style.top = `${clampedPosition.y}px`;
@@ -476,11 +697,22 @@ function restoreScrollPosition(notes) {
   });
 }
 
-async function renderStickyNotes({ restoreScroll = true } = {}) {
+function getRenderableNotesSignature(renderableNotes) {
+  return JSON.stringify(renderableNotes.map(({ note }, index) => {
+    const position = getNotePosition(note, index);
+    return {
+      id: getNoteRenderKey(note, index),
+      text: note.text || '',
+      completed: !!note.completed,
+      x: Number.isFinite(position.x) ? Math.round(position.x) : null,
+      y: Number.isFinite(position.y) ? Math.round(position.y) : null,
+    };
+  }));
+}
+
+async function renderStickyNotes({ restoreScroll = true, force = false } = {}) {
   isRenderingStickyNotes = true;
   try {
-    document.querySelectorAll('.web-shiori-note').forEach((noteEl) => noteEl.remove());
-
     const storage = window.webShioriStorage;
     if (!storage?.getNotesForUrl) return;
 
@@ -490,6 +722,12 @@ async function renderStickyNotes({ restoreScroll = true } = {}) {
     const renderableNotes = activeNotes
       .map((note, index) => resolveRenderableNote(note, index, { restoreScroll }))
       .filter(Boolean);
+    const renderSignature = getRenderableNotesSignature(renderableNotes);
+    if (!force && !restoreScroll && renderSignature === lastStickyRenderSignature) return;
+
+    document.querySelectorAll('.web-shiori-note').forEach((noteEl) => noteEl.remove());
+    lastStickyRenderSignature = renderSignature;
+
     if (restoreScroll && renderableNotes.every(({ anchorElement }) => !anchorElement)) restoreScrollPosition(activeNotes);
     renderableNotes.forEach(({ note }, index) => {
       document.body.appendChild(createStickyNote(note, index));
@@ -503,11 +741,14 @@ function scheduleContentAwareRefresh() {
   if (isRenderingStickyNotes) return;
 
   clearTimeout(contentAwareRefreshTimer);
+  const now = Date.now();
+  const throttleDelay = Math.max(0, CONTENT_AWARE_REFRESH_THROTTLE_MS - (now - lastContentAwareRefreshAt));
   contentAwareRefreshTimer = window.setTimeout(() => {
+    lastContentAwareRefreshAt = Date.now();
     renderStickyNotes({ restoreScroll: false }).catch(() => {
       // Keep page mutations safe even if extension storage is unavailable.
     });
-  }, 250);
+  }, Math.max(CONTENT_AWARE_REFRESH_DEBOUNCE_MS, throttleDelay));
 }
 
 function startContentAwareRefreshObserver() {
@@ -547,6 +788,7 @@ async function saveQuickEntryNote(noteText, initialPosition = null) {
         viewportWidth: position.viewportWidth,
         viewportHeight: position.viewportHeight,
         targetUrl: position.targetUrl,
+        anchorUrl: position.anchorUrl,
       }
     : undefined;
 
@@ -558,6 +800,7 @@ async function saveQuickEntryNote(noteText, initialPosition = null) {
     y: position.y,
     position,
     ...(position.targetUrl ? { targetUrl: position.targetUrl } : {}),
+    ...(position.anchorUrl ? { anchorUrl: position.anchorUrl } : {}),
     ...(anchor ? { anchor } : {}),
     completed: false,
   });
