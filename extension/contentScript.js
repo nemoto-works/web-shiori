@@ -5,6 +5,8 @@ let lastStickyRenderSignature = '';
 let lastContentAwareRefreshAt = 0;
 const CONTENT_AWARE_REFRESH_DEBOUNCE_MS = 350;
 const CONTENT_AWARE_REFRESH_THROTTLE_MS = 1000;
+const QUICK_ENTRY_JJ_TIMEOUT_MS = 400;
+let lastQuickEntryJPressAt = 0;
 
 const SLACK_ORIGINAL_MESSAGE_PERMALINK_ATTRIBUTES = [
   'data-original-message-permalink',
@@ -115,6 +117,59 @@ function getQuickEntryFallbackPosition() {
 
 document.addEventListener('pointerdown', rememberInteractionPosition, { capture: true, passive: true });
 document.addEventListener('click', rememberInteractionPosition, { capture: true, passive: true });
+
+function isQuickEntryTypingContext(target) {
+  if (!(target instanceof Element)) return false;
+
+  const editableSelectors = [
+    'input',
+    'textarea',
+    '[contenteditable=""]',
+    '[contenteditable="true"]',
+    '[role="textbox"]',
+    '[aria-multiline="true"]',
+    '[data-qa="message_input"]',
+    '[data-qa="message_input_field"]',
+    '[data-qa="slack_kit_editor"]',
+    '[data-qa="composer_input"]',
+    '[data-slate-editor="true"]',
+    '[data-lexical-editor="true"]',
+    '.ql-editor',
+    '.monaco-editor',
+    '.cm-editor',
+    '.CodeMirror',
+    '.ProseMirror',
+  ].join(', ');
+
+  if (target.closest(editableSelectors)) return true;
+
+  const activeElement = document.activeElement;
+  if (activeElement instanceof Element && activeElement !== document.body && activeElement.closest(editableSelectors)) {
+    return true;
+  }
+
+  return false;
+}
+
+function handleQuickEntryJjKeydown(event) {
+  if (event.defaultPrevented || event.repeat || event.isComposing) return;
+  if (event.key?.toLowerCase() !== 'j') return;
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  if (isQuickEntryTypingContext(event.target)) return;
+
+  const now = Date.now();
+  const isDoublePress = now - lastQuickEntryJPressAt <= QUICK_ENTRY_JJ_TIMEOUT_MS;
+  lastQuickEntryJPressAt = now;
+
+  event.preventDefault();
+
+  if (!isDoublePress) return;
+
+  lastQuickEntryJPressAt = 0;
+  showQuickEntryDialog();
+}
+
+document.addEventListener('keydown', handleQuickEntryJjKeydown, { capture: true });
 
 
 function isSlackWebPage(url = window.location.href) {
@@ -886,7 +941,7 @@ function showQuickEntryDialog() {
       removeQuickEntryDialog();
       event.preventDefault();
     }
-    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+    if (event.key === 'Enter' && !event.shiftKey) {
       save();
       event.preventDefault();
     }
