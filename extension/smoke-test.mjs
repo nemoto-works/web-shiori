@@ -6,7 +6,7 @@ const extensionDir = new URL('.', import.meta.url).pathname;
 const manifest = JSON.parse(readFileSync(join(extensionDir, 'manifest.json'), 'utf8'));
 
 assert.equal(manifest.manifest_version, 3);
-assert.equal(manifest.version, '0.1.11');
+assert.equal(manifest.version, '0.1.12');
 assert.equal(manifest.action.default_popup, 'popup.html');
 assert.ok(manifest.permissions.includes('storage'));
 assert.ok(manifest.permissions.includes('tabs'));
@@ -128,6 +128,15 @@ assert.match(contentScriptJs, /const position = initialPosition \|\| getQuickEnt
 assert.match(contentScriptJs, /web-shiori-quick-entry/);
 assert.match(contentScriptJs, /ctrlKey/);
 assert.match(contentScriptJs, /Escape/);
+assert.match(contentScriptJs, /QUICK_ENTRY_JJ_TIMEOUT_MS = 400/);
+assert.match(contentScriptJs, /handleQuickEntryJjKeydown/);
+assert.match(contentScriptJs, /event\.repeat/);
+assert.match(contentScriptJs, /isQuickEntryTypingContext/);
+assert.match(contentScriptJs, /monaco-editor/);
+assert.match(contentScriptJs, /CodeMirror/);
+assert.match(contentScriptJs, /ProseMirror/);
+assert.match(contentScriptJs, /data-qa=\"message_input\"/);
+assert.match(contentScriptJs, /event\.key === 'Enter' && !event\.shiftKey/);
 
 const backgroundJs = readFileSync(join(extensionDir, 'background.js'), 'utf8');
 assert.match(backgroundJs, /chrome\.commands\.onCommand\.addListener/);
