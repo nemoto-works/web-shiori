@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const extensionDir = new URL('.', import.meta.url).pathname;
 const manifest = JSON.parse(readFileSync(join(extensionDir, 'manifest.json'), 'utf8'));
@@ -191,5 +192,21 @@ assert.match(popupJs, /getAnchorFromPosition/);
 assert.match(popupJs, /selectedText/);
 assert.match(popupJs, /anchorUrl/);
 assert.match(popupJs, /anchor/);
+
+const packageResult = spawnSync(process.execPath, [join(extensionDir, 'package-extension.mjs')], {
+  cwd: extensionDir,
+  encoding: 'utf8',
+});
+assert.equal(packageResult.status, 0, packageResult.stderr);
+
+const artifactPath = join(extensionDir, '..', 'artifacts', 'web-shiori-extension.zip');
+assert.ok(existsSync(artifactPath));
+const archiveList = spawnSync('unzip', ['-Z1', artifactPath], { encoding: 'utf8' });
+assert.equal(archiveList.status, 0, archiveList.stderr);
+assert.deepEqual(
+  archiveList.stdout.trim().split('\n').sort(),
+  ['manifest.json', 'background.js', 'contentScript.js', 'storage.js', 'popup.html', 'popup.js'].sort(),
+);
+rmSync(artifactPath);
 
 console.log('extension smoke test passed');

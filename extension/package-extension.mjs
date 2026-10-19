@@ -1,26 +1,22 @@
-import { mkdirSync, readdirSync, statSync } from 'node:fs';
-import { basename, join, relative } from 'node:path';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const extensionDir = new URL('.', import.meta.url).pathname;
 const repoRoot = join(extensionDir, '..');
 const artifactDir = join(repoRoot, 'artifacts');
 const output = join(artifactDir, 'web-shiori-extension.zip');
-const files = [];
-
-function collect(dir) {
-  for (const entry of readdirSync(dir)) {
-    if (entry === 'node_modules') continue;
-    const path = join(dir, entry);
-    const rel = relative(extensionDir, path);
-    if (rel === basename(output)) continue;
-    if (statSync(path).isDirectory()) collect(path);
-    else files.push(rel);
-  }
-}
+const files = [
+  'manifest.json',
+  'background.js',
+  'contentScript.js',
+  'storage.js',
+  'popup.html',
+  'popup.js',
+];
 
 mkdirSync(artifactDir, { recursive: true });
-collect(extensionDir);
+if (existsSync(output)) rmSync(output);
 
 const zip = spawnSync('zip', ['-q', '-r', output, ...files], { cwd: extensionDir, stdio: 'inherit' });
 if (zip.status !== 0) {
